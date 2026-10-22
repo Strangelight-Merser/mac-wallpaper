@@ -1,0 +1,14 @@
+# Local test material: Wallpaper Engine samples/assets (copyrighted) and reference checkouts
+samples/
+third_party_refs/
+
+# Build and render output
+.build/
+out/
+
+# Tooling
+.swiftpm/
+xcuserdata/
+__pycache__/
+*.pyc
+.DS_Store
