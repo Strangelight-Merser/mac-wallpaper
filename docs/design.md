@@ -286,8 +286,34 @@ AVPlayerLayer   WKWebView + WE JS 桥     │
 - 验证：干净构建约 12 秒，0 警告；4 个主场景和 5 个特效预览的输出与手动构建版本逐像素一致；45 个特效预览全部渲染完成（shine 仍需要粒子系统）；App 启动后稳定 30 fps。
 - 还没做：Developer ID 签名和公证（需要 Apple Developer 付费账号），以及用 `SMAppService` 实现开机自启。
 
+## 6.12 后续路线图（2026-10-22 定）
+
+**已定的决策**
+- 定位：**开源发布，不上架 App Store**；许可证 GPLv3（部分代码移植自 linux-wallpaperengine（GPLv3）和 RePKG（MIT））。不做付费签名/公证，用户第一次打开时需要右键 → 打开。
+- 测试素材：暂时没有 Windows 截图；用户机器上的壁纸也没有 `.pkg` 格式的 → `.pkg` 降为低优先级。视频测试素材用 ffmpeg 自己生成。
+- 阶段二的顺序：先做视频壁纸（马上能覆盖大量真实壁纸），再做粒子系统。
+- webm：**不转码、不内置 ffmpeg**。在进程内解析 webm 容器，VP9 用 VideoToolbox 的补充解码器（macOS 11+），AV1 在 M3 及以上的芯片上走硬件解码；只有硬件不支持时才回退软件解码。解出的帧直接作为 Metal 纹理。动工前先做可行性验证。
+
+**阶段一：打牢基础**
+1. 正确性：`TEX<n>FORMAT` 填实际格式；sRGB 贴图；pass `conditions`、fbo `clear`、`compose`。
+2. shader 编译改为进程内调用 glslang/SPIRV-Cross，并加磁盘缓存（去掉对 Homebrew 的依赖，二次启动接近瞬时）。
+3. 回归测试集：现有样本 + 特效预览 + 自己生成的视频；把逐像素回归脚本化。
+
+**阶段二：内容覆盖**
+1. M1 视频壁纸（AVPlayer 播 mp4/mov；webm 走上面的方案），以及场景里的视频纹理（TEXB0004）。
+2. M1 网页壁纸（WKWebView + `wallpaperPropertyListener` / 音频监听桥接）。
+3. 鼠标交互：相机视差、`g_Pointer*`、光标类特效。
+4. M5 粒子系统，以及文字图层、音频频谱（ScreenCaptureKit，需要用户授权）。
+5. M6 SceneScript（JavaScriptCore，按官方 SceneScript 文档实现）。
+6. M7 3D 模型 / puppet。
+
+**阶段三：产品化**
+1. 壁纸库：自动发现 Steam 创意工坊目录、缩略图、按 `project.json` 生成属性面板、每块屏幕单独选壁纸、播放列表。
+2. 开机自启（SMAppService）；实测多显示器和遮挡暂停。
+3. 开源发布：README、构建说明、release 包。
+
 ## 7. 待确认
 1. 最低系统版本：建议 macOS 14（SMAppService、ScreenCaptureKit 音频成熟）。
 2. 工程形态：目前采用 SwiftPM + 生成 .app 的脚本（§6.11）；到需要正式签名分发时，再考虑加一个 Xcode 工程来包装。
-3. webm 处理方式：导入时转码 vs 内置解码器。
-4. 补充测试素材：2–3 个带 `scene.pkg` 的创意工坊壁纸、1–2 个 video 壁纸。
+3. ~~webm 处理方式~~：已定，进程内解析 + VideoToolbox 硬件解码（见 §6.12）。
+4. 补充测试素材：暂无（用户机器上没有 `.pkg` 壁纸）；视频素材用 ffmpeg 自己生成。
