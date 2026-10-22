@@ -1,10 +1,10 @@
 # Workshop test samples (Wallpaper Engine, app 431960): IDs and metadata only, no content.
 # Put each item's folder (Steam: steamapps/workshop/content/431960/<id>/) under samples/workshop/<id>/.
+# Only items rated Everyone; download only the ones a test needs (sizes below), after asking.
 # id          type   size_MB  features | title
 1155728109  Scene      6.4  - | Anime girl drinking coffee
 1780592523  Video     10.8  - | 你的名字
 2005884365  Scene     10.9  Audioresponsive,Customizable | Zero Two - Darling in the FranXX
-2179534274  Scene     39.7  - | 女孩短发连衣裙白色裤袜樱花动漫壁纸
 2828134691  Scene      5.8  - | Honkai: Star Rail Bronya
 2905017768  Web      651.5  Audioresponsive,Customizable,Dynamicresolution | Bocchi the Rock! ぼっち・ざ・ろっく！(Album)
 2930987618  Scene      9.0  - | Yamada Ryo [Vending Machine]

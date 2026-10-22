@@ -485,14 +485,18 @@ AVPlayerLayer   WKWebView + WE JS 桥     │
 
 ## 6.20 Steam 接入可行性验证（2026-10-22）
 
-**结论：一次扫码就能打通登录、网页和订阅读取；内容下载链路尚未实测（为节省用户流量暂停）。**
+**结论：一次扫码就能打通登录、网页、订阅读取和工坊内容下载。**
 
 - **工坊元数据**：`ISteamRemoteStorage/GetPublishedFileDetails` 不需要 API key，一次批量查询即可拿到类型、分级、分辨率、功能标签（音频响应、可自定义、视频纹理、Puppet Warp、媒体集成）、大小、更新时间、预览图和内容版本号（`hcontent_file`）。`file_url` 为空，内容只能走 Steam 的 depot 下载。热门榜前 30：视频 17、场景 12、网页 1。
 - **原生扫码登录**：直接用 HTTPS 调 `IAuthenticationService/BeginAuthSessionViaQR`（`platform_type=1`，即 SteamClient）→ 把 `challenge_url` 画成二维码 → 轮询 `PollAuthSessionStatus` → 用户手机确认后拿到刷新令牌（受众 `client, web, renew, derive`，约 7 个月有效）和访问令牌（`client, web`）。不依赖 SteamCMD/DepotDownloader，也不经过 Mac 上的 Steam 客户端。踩过的坑：二维码周围必须是不透明的白边（透明边在深色背景下显示成黑色，手机识别不了）。
 - **网页登录状态**：`steamLoginSecure=<SteamID>%7C%7C<访问令牌>` 这个 cookie 能让 steamcommunity 认出是本人，成功读到"我的订阅"页面（22 项）。内嵌工坊页面同样用它注入 WKWebView 的 cookie 存储即可登录，不必在网页里再登录一次。
 - **Web API 不认这种令牌**：带访问令牌调 `IPublishedFileService/GetUserFiles` 返回 401（Web API 只接受浏览器或手机 App 平台的令牌）。订阅列表因此改为：读社区页面，或者在 CM 连接上走同名的 unified 方法。
 - **决定**：产品里做原生的 Steam 模块（Swift）：二维码/密码登录、令牌存钥匙串、CM WebSocket 连接 + 刷新令牌登录、unified 调用（订阅、工坊详情）、depot manifest 与分块下载（解密、解压、校验、续传）。这是纯后端，适合交给 Codex 按规格实现，由我审查。DepotDownloader、steam-user 只作为开发期的对照工具，不进产品。
-- **待验证（需要用户同意的少量下载）**：用一个 4 MB 的场景（2996321829）走通"工坊内容 depot 下载"；确认 WE 的 `assets` 能否只取 `assets/` 目录。用户流量有限，大文件（订阅内容、WE 本体）由用户从 Windows 电脑拷贝，清单见 `regression/workshop/samples.txt`。
+- **工坊内容下载已走通**（用户同意下载一个 4 MB 的场景 2996321829）：同一个扫码令牌 → 连 CM 登录 → `PublishedFile` 详情拿到 `hcontent_file` → `ContentServerDirectory.GetManifestRequestCode` + 下载 manifest（工坊内容的 depot 就是 app 431960 本身）→ depot 密钥 → 从 CDN（`cacheN-<机房>.steamcontent.com/depot/431960/chunk/<sha1>`，HTTPS，这类缓存服务器不需要 CDN 令牌）下载分块 → 解密 → 解压 → 每块和每个文件的 SHA-1 都对得上。3 个文件 3.96 MB，约 20 秒（逐块串行，经用户当前的海外线路；Steam 认为出口 IP 在美国，分配的是美国机房）。产品里要并行下载多个分块。
+  - 分块格式：先 AES-256-ECB 解出 16 字节 IV，其余 AES-256-CBC + PKCS#7 填充；解密后是 `VZa`（LZMA，结尾 `zv`）或 `VSZa`（zstd，结尾 `zsv`）。
+  - 对照工具 steam-user 5.3 在 Node 26 上有两个问题，原生实现时要避开：自带的 HTTP 下载会截断响应；`@doctormckay/steam-crypto` 去填充时多删了字节，导致 `zv` 结尾被截掉。改为自己下载、自己解密后就正常了。
+  - 下载的场景是 `scene.pkg`（PKGV0018）：用 `wecli pkg` 解包后能渲染出主体画面；缺两个粒子系统和一个文字图层——正好是兼容性检查要报告的内容。`.pkg` 直接作为资源根仍在路线图上。
+- **测试样本规则**：只用分级为 Everyone 的壁纸；只下载测试真正需要的；下载前先告诉用户大小，由用户决定（也可以由用户从 Windows 电脑拷贝）。清单见 `regression/workshop/samples.txt`（21 项，已去掉 1 个 Questionable）。确认 WE 的 `assets` 能否只取 `assets/` 目录仍待验证（需要下载，先问用户）。
 
 ## 7. 待确认
 1. 最低系统版本：建议 macOS 14（SMAppService、ScreenCaptureKit 音频成熟）。
