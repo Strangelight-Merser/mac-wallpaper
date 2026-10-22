@@ -181,18 +181,20 @@ case "render":
     guard let out = opts["--out"] else { usage() }
     let size = (opts["--size"] ?? "1920x1080").split(separator: "x").compactMap { Int($0) }
     guard size.count == 2 else { usage() }
-    let renderer = try SceneRenderer(project: URL(fileURLWithPath: args[2]),
-                                     assets: opts["--assets"].map { URL(fileURLWithPath: $0) }, properties: props)
-    renderer.disableBloom = opts["--bloom"] == "off"
-    renderer.debugTarget = opts["--target"]
-    renderer.onlyLayers = opts["--layers"].map { Set($0.split(separator: ",").map(String.init)) }
-    renderer.disableLayerCache = opts["--cache"] == "off"
+    let renderer = try Wallpaper.open(project: URL(fileURLWithPath: args[2]),
+                                      assets: opts["--assets"].map { URL(fileURLWithPath: $0) }, properties: props)
+    if let scene = renderer as? SceneRenderer { // scene-only debug options
+        scene.disableBloom = opts["--bloom"] == "off"
+        scene.debugTarget = opts["--target"]
+        scene.onlyLayers = opts["--layers"].map { Set($0.split(separator: ",").map(String.init)) }
+        scene.disableLayerCache = opts["--cache"] == "off"
+    }
     // --warm t: render a frame at time t first, so the measured frame uses the layer caches.
     if let warm = opts["--warm"].flatMap(Float.init) { _ = try renderer.render(width: size[0], height: size[1], time: warm) }
     let start = Date()
     let img = try renderer.render(width: size[0], height: size[1], time: Float(opts["--time"] ?? "0") ?? 0)
     try writePNG(img, to: URL(fileURLWithPath: out))
-    print(String(format: "rendered %d layer(s) in %.2fs -> %@", renderer.scene.layers.count, Date().timeIntervalSince(start), out))
+    print(String(format: "rendered %@ in %.2fs -> %@", renderer.summary, Date().timeIntervalSince(start), out))
     for w in Set(renderer.warnings).sorted() { print("  warning: \(w)") }
     if ProcessInfo.processInfo.environment["WE_SHADER_PARITY"] != nil {
         print("  shader parity: \(ShaderCompiler.programsCompiled) program(s), \(ShaderCompiler.parityMismatches.count) mismatch(es)")

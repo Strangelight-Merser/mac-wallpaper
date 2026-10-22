@@ -25,7 +25,9 @@ if [[ ${1:-} == --case ]]; then
   name=$1 wallpaper=$2; shift 2
   out=$CURRENT/$name.png warnings=$CURRENT/$name.warnings.txt
   mkdir -p ${out:h}
-  log=$("$WECLI" render "$SAMPLES/$wallpaper" --assets "$SAMPLES/wallpaper_engine/assets" "$@" --out "$out" 2>&1)
+  # Paths under regression/ are self-generated test content; everything else lives in $SAMPLES.
+  [[ $wallpaper == regression/* ]] && wallpaper=$ROOT/$wallpaper || wallpaper=$SAMPLES/$wallpaper
+  log=$("$WECLI" render "$wallpaper" --assets "$SAMPLES/wallpaper_engine/assets" "$@" --out "$out" 2>&1)
   if [[ $? != 0 || ! -f $out ]]; then
     echo "ERROR    $name: $(print -r -- $log | tail -1)"; exit 0
   fi
@@ -69,6 +71,10 @@ if (( build )); then
   swift build -c release 2>&1 | grep -E 'error|warning:' && { echo "build failed"; exit 1; }
 fi
 [[ -d $SAMPLES/wallpaper_engine/assets ]] || { echo "no Wallpaper Engine assets under $SAMPLES"; exit 1; }
+# Self-generated test videos (needs ffmpeg once).
+if grep -q '^video/' regression/cases.txt && [[ ! -d regression/videos ]]; then
+  ./scripts/make_test_videos.sh >/dev/null || { echo "could not generate test videos (is ffmpeg installed?)"; exit 1; }
+fi
 
 rm -rf $CURRENT $DIFFS
 mkdir -p $CURRENT

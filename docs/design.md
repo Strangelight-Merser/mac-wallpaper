@@ -307,7 +307,7 @@ AVPlayerLayer   WKWebView + WE JS 桥     │
 - 验证：4 个主场景、44 个特效预览逐像素不变；在同一状态下与上一个 commit 做 A/B bench，CPU 差异在噪声范围内（约 0.03 ms）。
 
 **阶段二：内容覆盖**
-1. M1 视频壁纸（AVPlayer 播 mp4/mov；webm 走上面的方案），以及场景里的视频纹理（TEXB0004）。
+1. ✅ M1 视频壁纸（§6.15、§6.16；mp4/mov/webm-VP9/AV1）。场景里的视频纹理（TEXB0004）和 VP8 留到后面。
 2. M1 网页壁纸（WKWebView + `wallpaperPropertyListener` / 音频监听桥接）。
 3. 鼠标交互：相机视差、`g_Pointer*`、光标类特效。
 4. M5 粒子系统，以及文字图层、音频频谱（ScreenCaptureKit，需要用户授权）。
@@ -348,6 +348,44 @@ AVPlayerLayer   WKWebView + WE JS 桥     │
 - 当前这套参考图已经和此前人工目视确认过的输出做了核对：4 个场景、45 个特效预览全部逐像素一致。
 - **验证过三条路径**：①正常全部通过 99/99；②临时故意改坏渲染器（改混合因子 + 删掉 `g_Frametime` 内建 uniform）→ 93 个用例失败，其中 cursorripple/fluidsimulation 准确报出新增的 `no value for g_Frametime` 警告，vortex 这种只有 0.49% 像素变化的也能抓到；还原后恢复 99/99；③参考图缺失 → 报 MISSING 并判定失败。
 - `scripts/render_effect_previews.sh` 保留，用于生成供目视检查的拼图；`scripts/shader_batch.py` 仍走 CLI，只用于 shader 覆盖率统计。
+
+## 6.15 视频壁纸：可行性验证（2026-10-22，阶段二第 1 项）
+
+测试素材用 `scripts/make_test_videos.sh` 生成（ffmpeg testsrc2，1280×720，30 fps，4 秒，内容固定），每个都包装成最小的 WE video 工程，放在 gitignore 掉的 `regression/videos/`：h264_mp4、hevc_mp4、h264_mov、vp9_webm、vp8_webm、av1_webm、av1_mp4。
+
+**系统能力探测（M4，macOS 15.6）**
+
+| 编解码 | VideoToolbox 硬解 | AVFoundation 能否播放 |
+|---|---|---|
+| H.264 / HEVC | ✅ | ✅（mp4/mov） |
+| AV1 | ✅（M3 起才有硬件） | ✅ mp4 / ❌ webm |
+| VP9 | ✅（`VTRegisterSupplementalVideoDecoderIfAvailable`） | ❌ webm |
+| VP8 | ❌ 苹果没有任何解码器 | ❌ |
+
+**Spike**：自写最小 EBML/WebM 解析器，构造 `vpcC`（VP9）/`av1C`（AV1，直接取 CodecPrivate）格式描述，交给 VTDecompressionSession（强制硬件）→ VP9、AV1 都是 **120/120 帧、0 错误、每帧约 1.3–1.6 ms（720p）**，确认在用硬件解码器。第 30 帧与 ffmpeg 解码对比：ffmpeg 改用 BT.709 后平均差 1.2；剩下的差异只出现在色条硬边上，是两者色度上采样方式不同造成的，不是解码错误。注意 ffmpeg 导出 PNG 时默认用 BT.601，而 VideoToolbox 对 HD 内容用 BT.709。
+
+**定案**
+- mp4/mov 走 AVAssetReader，webm 走自写解析器 + VideoToolbox；两者都输出 BGRA `CVPixelBuffer`，经由同一套接口"按时间取帧"，实时播放与离线回归渲染走同一条解码路径。
+- `VideoRenderer` 通过 `CVMetalTextureCache` 零拷贝转成 Metal 纹理，按 cover 方式铺满，复用 App 现有的 `encodeFrame` 接口（暂停策略、多屏、菜单都不用改）。
+- VP8：苹果没有解码器 → 以后用 WebKit 内置的 VP8 解码器兜底（反正网页壁纸也要用 WKWebView），不为这个少见的编码单独引入 libvpx。本轮先不支持。
+- 音频：本轮静音，以后加音量控制。
+
+## 6.16 视频壁纸实现（2026-10-22）
+
+- **`WEVideo` 模块**：`WebMFile`（EBML/Matroska 解析：未知长度元素、SimpleBlock、BlockGroup——没有 ReferenceBlock 才算关键帧、Duration/DefaultDuration、遇到 lacing 计数后跳过；文件内存映射，只保存帧的字节范围、不复制数据）；`VideoSource`（"取 t 时刻的帧"：循环播放、顺序解码并预读一帧、时间倒退时重新从头开始），两个后端：
+  - `WebMVideoSource`：VP9（用首帧头信息构造 `vpcC`）/ AV1（`av1C` 直接取 CodecPrivate）→ VTDecompressionSession；没有对应硬件解码器时直接报错并说明原因。
+  - `AssetVideoSource`：AVAssetReader（mp4/mov/m4v），输出同样是 BGRA、IOSurface、Metal 兼容的像素缓冲。
+- **`VideoRenderer`**：通过 `CVMetalTextureCache` 零拷贝转成纹理，用一个全屏三角形按 cover 方式取 UV 窗口（居中裁切，不拉伸）；纹理与像素缓冲的生命周期一直保持到 GPU 完成。
+- **`WallpaperRenderer` 协议 + `Wallpaper.open()`** 按 `project.json` 的 `type` 选择渲染器（video → VideoRenderer，web/application → 暂不支持并给出明确错误，其余 → SceneRenderer）；App 和 `wecli` 都改为走它，场景专用的调试选项通过类型转换设置。readback 提取成了共用函数。
+- **正确性**：t=1 时 6 种格式都是第 30 帧；各编码之间只有有损压缩带来的差异（平均 < 0.6）；H.264 的 mov 与 mp4 完全一致；webm 路径与 spike 中直接调 VideoToolbox 的结果完全一致；t=5 与 t=1 完全一致（循环）；时间倒退后重新解码的结果也完全一致。
+- **实时性能（4K30，App 中实测）**：HEVC CPU 6.3%、GPU 1.5–1.7 ms；VP9 4.4%、0.7–0.8 ms；AV1 4.4%、1.3–1.6 ms；均稳定 30 fps。（作为对比，razer_bedroom 约 7.6%。）
+- **回归**：新增 17 个视频用例（6 种格式、循环、重启、竖屏 cover），测试视频缺失时由 `regress.sh` 自动生成；全套 116/116 通过，约 6.5 秒；新参考图已与上面人工核对过的输出逐一比对。
+
+**后续**
+- VP8：用 WebKit 兜底（与网页壁纸一起做）。
+- 音频：现在静音；之后接 AVPlayer 或 AudioToolbox（webm 音轨是 Opus/Vorbis）并提供音量设置。
+- 帧率：App 默认 30 fps，60 fps 的视频会被降帧；视频壁纸应自动匹配源帧率（或以显示器刷新率为上限）。
+- 解码目前在主线程同步进行（4K 每帧约 1–2 ms）；如果遇到高码率 8K，再改成后台预解码队列。
 
 ## 7. 待确认
 1. 最低系统版本：建议 macOS 14（SMAppService、ScreenCaptureKit 音频成熟）。

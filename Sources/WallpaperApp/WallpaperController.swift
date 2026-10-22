@@ -12,7 +12,7 @@ final class WallpaperController: NSObject, MTKViewDelegate {
     }
 
     let device = MTLCreateSystemDefaultDevice()!
-    private(set) var renderer: SceneRenderer?
+    private(set) var renderer: WallpaperRenderer?
     private(set) var windows: [DesktopWindow] = []
     private(set) var pauseReasons: Set<PauseReason> = [.loading]
     var onStateChange: (() -> Void)?
@@ -54,16 +54,16 @@ final class WallpaperController: NSObject, MTKViewDelegate {
         let started = CACurrentMediaTime()
         DispatchQueue.global(qos: .userInitiated).async {
             do {
-                let r = try SceneRenderer(project: wallpaper, assets: assets)
+                let r = try Wallpaper.open(project: wallpaper, assets: assets)
                 // Hidden default for A/B measurements: `-disableLayerCache YES`.
-                r.disableLayerCache = UserDefaults.standard.bool(forKey: "disableLayerCache")
+                (r as? SceneRenderer)?.disableLayerCache = UserDefaults.standard.bool(forKey: "disableLayerCache")
                 // Warm-up frame compiles every shader/pipeline before the first on-screen frame.
                 _ = try r.render(width: 64, height: 36, time: 0)
                 DispatchQueue.main.async {
                     self.renderer = r
                     self.clock = 0
                     for w in r.warnings { log("warning: \(w)") }
-                    log(String(format: "ready in %.2fs", CACurrentMediaTime() - started))
+                    log(String(format: "ready in %.2fs (%@)", CACurrentMediaTime() - started, r.summary))
                     self.setPaused(.loading, false)
                 }
             } catch {

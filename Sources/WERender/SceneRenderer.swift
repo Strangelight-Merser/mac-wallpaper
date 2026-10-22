@@ -14,7 +14,7 @@ import WEShader
 ///   ping-ponging between two FBOs (an empty texture slot 0 = previous output), and the last pass draws
 ///   the layer quad into the scene target.
 /// Scene bloom reuses WE's own bloom shaders on `_rt_FullFrameBuffer`.
-public final class SceneRenderer {
+public final class SceneRenderer: WallpaperRenderer {
     public let device: MTLDevice
     public let queue: MTLCommandQueue
     let locator: AssetLocator
@@ -84,6 +84,8 @@ public final class SceneRenderer {
         colorFormat = scene.hdr ? .rgba16Float : .rgba8Unorm
         scene.notes.forEach(warn)
     }
+
+    public var summary: String { "scene, \(scene.layers.count) layers" }
 
     // MARK: - frame
 
@@ -958,39 +960,7 @@ public final class SceneRenderer {
         return ortho(left: lo.x, right: hi.x, bottom: lo.y, top: hi.y)
     }
 
-    func readback(_ t: MTLTexture) throws -> CGImage {
-        let w = t.width, h = t.height
-        // Private target: copy into a shared 8-bit texture via a blit-compatible path.
-        let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: t.pixelFormat, width: w, height: h, mipmapped: false)
-        d.storageMode = .shared
-        let staging = device.makeTexture(descriptor: d)!
-        let cmd = queue.makeCommandBuffer()!
-        let blit = cmd.makeBlitCommandEncoder()!
-        blit.copy(from: t, to: staging)
-        blit.endEncoding()
-        cmd.commit()
-        cmd.waitUntilCompleted()
-
-        var px = [UInt8](repeating: 255, count: w * h * 4)
-        if t.pixelFormat == .rgba16Float {
-            var half = [Float16](repeating: 0, count: w * h * 4)
-            staging.getBytes(&half, bytesPerRow: w * 8, from: MTLRegionMake2D(0, 0, w, h), mipmapLevel: 0)
-            for i in 0..<half.count where i % 4 != 3 {
-                px[i] = UInt8(max(0, min(1, Float(half[i]))) * 255 + 0.5)
-            }
-        } else {
-            staging.getBytes(&px, bytesPerRow: w * 4, from: MTLRegionMake2D(0, 0, w, h), mipmapLevel: 0)
-            for i in stride(from: 3, to: px.count, by: 4) { px[i] = 255 }
-        }
-        let provider = CGDataProvider(data: Data(px) as CFData)!
-        guard let img = CGImage(width: w, height: h, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: w * 4,
-                                space: CGColorSpace(name: CGColorSpace.sRGB)!,
-                                bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue),
-                                provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent) else {
-            throw WEFormatError.unsupported("readback")
-        }
-        return img
-    }
+    func readback(_ t: MTLTexture) throws -> CGImage { try readbackImage(t, device: device, queue: queue) }
 }
 
 // MARK: - math
