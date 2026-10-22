@@ -1,0 +1,37 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>bridge test</title>
+<style>
+  body { margin: 0; font: 22px/1.3 Menlo, monospace; background: #222; color: #eee; }
+  #bar { height: 60px; }
+  .row { padding: 4px 24px; }
+  .ok { color: #6f6; } .bad { color: #f66; }
+  #mask { width: 120px; height: 120px; background: #4af; -webkit-mask-image: url(mask.svg); mask-image: url(mask.svg); margin: 12px 24px; }
+</style></head>
+<body>
+<div id="bar"></div>
+<div class="row" id="types">types: waiting</div>
+<div class="row" id="general">general: waiting</div>
+<div class="row" id="audio">audio: ?</div>
+<div class="row" id="fetch">fetch: waiting</div>
+<div class="row" id="caption"></div>
+<div id="mask"></div>
+<script>
+  const row = (id, ok, text) => { const e = document.getElementById(id); e.textContent = id + ': ' + text; e.className = 'row ' + (ok ? 'ok' : 'bad'); };
+  row('audio', typeof window.wallpaperRegisterAudioListener === 'function', typeof window.wallpaperRegisterAudioListener);
+  window.wallpaperRegisterAudioListener(() => {});
+  fetch('data.json').then(r => r.json()).then(j => row('fetch', true, j.message)).catch(e => row('fetch', false, String(e)));
+  // Assign the listener late: properties must still arrive.
+  setTimeout(() => {
+    window.wallpaperPropertyListener = {
+      applyGeneralProperties(p) { row('general', p.fps > 0, 'fps ' + p.fps); },
+      applyUserProperties(p) {
+        if (p.accent) { const c = p.accent.value.split(' ').map(x => Math.round(x * 255)); document.getElementById('bar').style.background = `rgb(${c})`; }
+        const types = [typeof p.enabled.value, typeof p.size.value, typeof p.mode.value].join(',');
+        // Typed per project.json declaration (bool, slider, combo), whatever the stored/override text.
+        row('types', types === 'boolean,number,string', types + ' / ' + JSON.stringify([p.enabled.value, p.size.value, p.mode.value]));
+        document.getElementById('caption').textContent = 'caption: ' + p.caption.value;
+      },
+    };
+  }, 100);
+</script>
+</body></html>

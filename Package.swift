@@ -78,9 +78,10 @@ let package = Package(
         ),
         .target(name: "WEShader", dependencies: ["WEFormat", "CShaderTools"]),
         .target(name: "WEVideo"),
+        .target(name: "WEWeb", dependencies: ["WERender"]),
         .target(name: "WERender", dependencies: ["WEFormat", "WEShader", "WEVideo"]),
-        .executableTarget(name: "wecli", dependencies: ["WEFormat", "WERender", "WEShader"]),
-        .executableTarget(name: "WallpaperApp", dependencies: ["WERender"]),
+        .executableTarget(name: "wecli", dependencies: ["WEFormat", "WERender", "WEShader", "WEWeb"]),
+        .executableTarget(name: "WallpaperApp", dependencies: ["WERender", "WEWeb"]),
         // Compiles .metal files through MTLDevice.makeLibrary (used by scripts/shader_batch.py).
         .executableTarget(name: "metalcheck", path: "tools", sources: ["metalcheck.swift"]),
     ],

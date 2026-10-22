@@ -308,7 +308,7 @@ AVPlayerLayer   WKWebView + WE JS 桥     │
 
 **阶段二：内容覆盖**
 1. ✅ M1 视频壁纸（§6.15、§6.16；mp4/mov/webm-VP9/AV1）。场景里的视频纹理（TEXB0004）和 VP8 留到后面。
-2. M1 网页壁纸（WKWebView + `wallpaperPropertyListener` / 音频监听桥接）。
+2. ✅ M1 网页壁纸 + VP8 的 WebKit 兜底（§6.17）。
 3. 鼠标交互：相机视差、`g_Pointer*`、光标类特效。
 4. M5 粒子系统，以及文字图层、音频频谱（ScreenCaptureKit，需要用户授权）。
 5. M6 SceneScript（JavaScriptCore，按官方 SceneScript 文档实现）。
@@ -386,6 +386,33 @@ AVPlayerLayer   WKWebView + WE JS 桥     │
 - 音频：现在静音；之后接 AVPlayer 或 AudioToolbox（webm 音轨是 Opus/Vorbis）并提供音量设置。
 - 帧率：App 默认 30 fps，60 fps 的视频会被降帧；视频壁纸应自动匹配源帧率（或以显示器刷新率为上限）。
 - 解码目前在主线程同步进行（4K 每帧约 1–2 ms）；如果遇到高码率 8K，再改成后台预解码队列。
+
+## 6.17 网页壁纸 + VP8 的 WebKit 兜底（2026-10-22，阶段二第 2 项）
+
+**JS 接口**（依据官方 corsair_o_tron / corsair_collection 的用法）：`window.wallpaperPropertyListener = {applyUserProperties({name: {value}}), applyGeneralProperties({fps}), setPaused(bool)}`；`window.wallpaperRegisterAudioListener(cb)` 会在**脚本加载时**就被调用。
+
+**`WEWeb` 模块（`WebWallpaper`）**
+- 桥接脚本在 document start 注入：定义所有 `wallpaperRegister*` 函数（音频监听已注册但暂时不推数据，媒体类为空实现）；拦截对 `wallpaperPropertyListener` 的**赋值**，赋值后立刻投递 general/user 属性和暂停状态（页面再晚注册也收得到）；页面里的 `error`/`unhandledrejection` 转成渲染器警告。
+- **属性按声明类型转换**：project.json 里常把布尔值、数字写成字符串（例如 corsair_o_tron 的 `logorings: "true"`），而页面用 `=== true` 判断；bool → 布尔、slider → 数字、combo/color/text 保持字符串。JSON 布尔值要用 CFBoolean 来判断，因为 Swift 里任何值为 0/1 的 `NSNumber` 都能匹配 `is Bool`。
+- **自定义 URL scheme `wewallpaper://`（`WallpaperSchemeHandler`）**：从 file:// 加载的页面 origin 是不透明的，WebKit 会把页面自己的文件当成跨域，于是 CSS `mask-image`、`fetch`/XHR 本地 JSON、canvas 读图都会失败（corsair_o_tron 的 logo 和光环就因此消失）。改为把壁纸目录作为同源站点提供：支持 Range 请求（`<video>`/`<audio>` 需要），路径不能越出壁纸目录，不需要依赖私有的 WebKit 偏好设置。
+- **暂停**：`setPaused(true)` 会调用页面自己的 `setPaused`、挂起媒体播放、隐藏视图（页面变成 hidden，rAF 停止、定时器降频）。
+- **VP8**：生成一个自有页面（`<video loop muted>`，object-fit: cover）。离线截帧方式是 seek 到 t → 等 `seeked` → 用 canvas 读帧，结果是确定性的。
+
+**接入**：`Wallpaper.open` 对网页壁纸和 VP8 抛出类型化的 `WallpaperError.needsWebKit(.page/.video)`（WERender 本身不依赖 WebKit）；App 收到后为每块屏幕各建一个 `WebWallpaper`（一个视图只能挂在一个窗口里），替换掉 Metal 视图；暂停/遮挡策略按屏幕分别调用 `setPaused`，只在状态变化时调用。`wecli render` 用离屏窗口截图（窗口按点数设尺寸，让输出正好是要求的像素；不设 `snapshotWidth`，因为缩放截图会丢失合成层，比如 CSS mask）；`WE_WEB_EVAL` 可以在截图前对页面求值一个 JS 表达式用于调试。WallpaperController、AppDelegate 改为 `@MainActor`。
+
+**实测（App + 它的 WebKit 进程合计 CPU）**
+
+| | 运行 | 暂停（模拟锁屏） |
+|---|---|---|
+| corsair_o_tron | 6.0% | **0.0%**（恢复后 5.8%） |
+| VP8 720p | 7.3% | 0.2% |
+| VP8 4K30 | 27.4%（软件解码） | 0.2% |
+
+**颜色（顺带修正测试视频）**：此前测试视频在 RGB→YUV 时用的是 BT.601 且没有打标签，VideoToolbox 对未打标签的 HD 视频按 BT.709 解释 → 颜色略有偏差。现在测试视频统一按 BT.709 转换并打标签（和真实 HD 视频一样），解码结果与原始图案相差只有 1–4 级。VP8 本身不能携带色彩信息，规范规定为 BT.601，所以 VP8 测试视频按 BT.601 编码；WebKit 还会额外把 BT.601（SMPTE-C）原色色彩管理到 sRGB，因此与 ffmpeg/VideoToolbox 的输出相差约 17——这是 WebKit 处理得更"正确"，不是解码错误。视频参考图已经按新素材重新生成，并与原始图案逐一核对过。
+
+**回归**：新增 7 个用例——自写的桥接测试页（`regression/fixtures/webtest`，可以提交：覆盖属性类型、晚注册监听、fps、音频注册函数、同源 fetch、CSS mask）的默认/覆盖两种、corsair_o_tron 默认/覆盖两种、VP8 的 3 个用例。离屏状态下 CSS 动画和 rAF 不会推进，所以截图是确定的（连续三次逐像素一致）。全套 123/123，连续跑两次都通过。
+
+**后续**：音频频谱采集（ScreenCaptureKit）→ 喂给 `wallpaperRegisterAudioListener` 和场景里的 `g_AudioSpectrum*`；鼠标事件转发给网页壁纸；`userDirectoryFiles*` 等不常用接口。
 
 ## 7. 待确认
 1. 最低系统版本：建议 macOS 14（SMAppService、ScreenCaptureKit 音频成熟）。

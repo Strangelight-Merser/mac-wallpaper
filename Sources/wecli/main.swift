@@ -1,7 +1,9 @@
 import CoreGraphics
 import Foundation
 import ImageIO
+import AppKit
 import Metal
+import WEWeb
 import UniformTypeIdentifiers
 import WEFormat
 import WERender
@@ -85,6 +87,49 @@ func describe(_ tex: Tex) -> String {
     case nil: payload = "-"
     }
     return "fmt=\(tex.format) v\(tex.containerVersion) flags=\(tex.flags.rawValue) tex=\(tex.textureWidth)x\(tex.textureHeight) img=\(tex.imageWidth)x\(tex.imageHeight) images=\(tex.images.count) mips=\(tex.images.first?.count ?? 0) top=\(m.map { "\($0.width)x\($0.height)" } ?? "-") payload=\(payload) frames=\(tex.frames.count)"
+}
+
+/// Offscreen WebKit capture for web wallpapers and VP8 videos: an off-screen window sized so the
+/// snapshot comes out at exactly width×height pixels; the run loop spins until the capture is done.
+@MainActor
+func renderWithWebKit(_ request: WebContentRequest, width: Int, height: Int, time: Double,
+                      settle: Double = Double(ProcessInfo.processInfo.environment["WE_WEB_SETTLE"] ?? "") ?? 0.5) throws -> (CGImage, [String]) {
+    let app = NSApplication.shared
+    app.setActivationPolicy(.prohibited)
+    let web = WebWallpaper(request: request)
+    let scale = NSScreen.main?.backingScaleFactor ?? 1
+    let window = NSWindow(contentRect: NSRect(x: -30000, y: -30000, width: CGFloat(width) / scale, height: CGFloat(height) / scale),
+                          styleMask: .borderless, backing: .buffered, defer: false)
+    window.contentView = web.webView
+    window.orderFrontRegardless()
+    var result: Result<CGImage, Error>?
+    // Debug: WE_WEB_EVAL="<js expression>" is evaluated in the page just before the capture.
+    if let js = ProcessInfo.processInfo.environment["WE_WEB_EVAL"] {
+        var done = false
+        Task { @MainActor in
+            try? await web.waitUntilLoaded()
+            try? await Task.sleep(nanoseconds: UInt64(settle * 1e9))
+            let value = try? await web.webView.evaluateJavaScript("JSON.stringify(\(js))")
+            print("  eval: \(value ?? "nil")")
+            done = true
+        }
+        while !done { RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.02)) }
+    }
+    Task { @MainActor in
+        do { result = .success(try await web.capture(width: width, height: height, time: time, settle: settle)) } catch { result = .failure(error) }
+    }
+    let deadline = Date().addingTimeInterval(30)
+    while result == nil && Date() < deadline { RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.02)) }
+    window.orderOut(nil)
+    guard let result else { throw WebWallpaperError.capture("timed out") }
+    // Normalise to exactly width×height, opaque.
+    let image = try result.get()
+    var px = [UInt8](repeating: 0, count: width * height * 4)
+    let ctx = CGContext(data: &px, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+                        space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)!
+    ctx.interpolationQuality = .high
+    ctx.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+    return (ctx.makeImage()!, web.warnings)
 }
 
 let args = CommandLine.arguments
@@ -181,21 +226,36 @@ case "render":
     guard let out = opts["--out"] else { usage() }
     let size = (opts["--size"] ?? "1920x1080").split(separator: "x").compactMap { Int($0) }
     guard size.count == 2 else { usage() }
-    let renderer = try Wallpaper.open(project: URL(fileURLWithPath: args[2]),
-                                      assets: opts["--assets"].map { URL(fileURLWithPath: $0) }, properties: props)
-    if let scene = renderer as? SceneRenderer { // scene-only debug options
-        scene.disableBloom = opts["--bloom"] == "off"
-        scene.debugTarget = opts["--target"]
-        scene.onlyLayers = opts["--layers"].map { Set($0.split(separator: ",").map(String.init)) }
-        scene.disableLayerCache = opts["--cache"] == "off"
+    let time = Float(opts["--time"] ?? "0") ?? 0
+    var start = Date()
+    let img: CGImage
+    let summary: String
+    let warnings: [String]
+    do {
+        let renderer = try Wallpaper.open(project: URL(fileURLWithPath: args[2]),
+                                          assets: opts["--assets"].map { URL(fileURLWithPath: $0) }, properties: props)
+        if let scene = renderer as? SceneRenderer { // scene-only debug options
+            scene.disableBloom = opts["--bloom"] == "off"
+            scene.debugTarget = opts["--target"]
+            scene.onlyLayers = opts["--layers"].map { Set($0.split(separator: ",").map(String.init)) }
+            scene.disableLayerCache = opts["--cache"] == "off"
+        }
+        // --warm t: render a frame at time t first, so the measured frame uses the layer caches.
+        if let warm = opts["--warm"].flatMap(Float.init) { _ = try renderer.render(width: size[0], height: size[1], time: warm) }
+        start = Date()
+        img = try renderer.render(width: size[0], height: size[1], time: time)
+        summary = renderer.summary
+        warnings = renderer.warnings
+    } catch WallpaperError.needsWebKit(let request) {
+        start = Date()
+        (img, warnings) = try MainActor.assumeIsolated {
+            try renderWithWebKit(request, width: size[0], height: size[1], time: Double(time))
+        }
+        if case .video = request { summary = "web video (WebKit)" } else { summary = "web page (WebKit)" }
     }
-    // --warm t: render a frame at time t first, so the measured frame uses the layer caches.
-    if let warm = opts["--warm"].flatMap(Float.init) { _ = try renderer.render(width: size[0], height: size[1], time: warm) }
-    let start = Date()
-    let img = try renderer.render(width: size[0], height: size[1], time: Float(opts["--time"] ?? "0") ?? 0)
     try writePNG(img, to: URL(fileURLWithPath: out))
-    print(String(format: "rendered %@ in %.2fs -> %@", renderer.summary, Date().timeIntervalSince(start), out))
-    for w in Set(renderer.warnings).sorted() { print("  warning: \(w)") }
+    print(String(format: "rendered %@ in %.2fs -> %@", summary, Date().timeIntervalSince(start), out))
+    for w in Set(warnings).sorted() { print("  warning: \(w)") }
     if ProcessInfo.processInfo.environment["WE_SHADER_PARITY"] != nil {
         print("  shader parity: \(ShaderCompiler.programsCompiled) program(s), \(ShaderCompiler.parityMismatches.count) mismatch(es)")
         ShaderCompiler.parityMismatches.forEach { print("    \($0)") }

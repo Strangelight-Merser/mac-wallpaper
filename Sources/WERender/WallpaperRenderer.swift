@@ -2,6 +2,7 @@ import CoreGraphics
 import Foundation
 import Metal
 import WEFormat
+import WEVideo
 
 /// Anything the app and `wecli` can draw: scene wallpapers (`SceneRenderer`) and video wallpapers
 /// (`VideoRenderer`).
@@ -28,12 +29,66 @@ public enum Wallpaper {
         switch type {
         case "video"?:
             guard let url = locator.url(file) else { throw WEFormatError.unsupported("video file \(file) not found") }
-            return try VideoRenderer(url: url)
-        case "web"?, "application"?:
-            throw WEFormatError.unsupported("\(type!) wallpapers are not supported yet")
+            do { return try VideoRenderer(url: url) } catch VideoError.needsWebKit(let url) {
+                throw WallpaperError.needsWebKit(.video(url))
+            }
+        case "web"?:
+            guard let index = locator.url(file) else { throw WEFormatError.unsupported("web page \(file) not found") }
+            let props = UserProperties(project: json, overrides: properties)
+            throw WallpaperError.needsWebKit(.page(index: index, root: project, properties: webProperties(json, props)))
+        case "application"?:
+            throw WEFormatError.unsupported("application wallpapers (Windows programs) are not supported")
         default:
             return try SceneRenderer(project: project, assets: assets, properties: properties)
         }
+    }
+}
+
+/// What WebKit must show instead of a Metal renderer (web wallpapers, VP8 videos).
+public enum WebContentRequest {
+    case page(index: URL, root: URL, properties: [String: [String: Any]])
+    case video(URL)
+}
+
+public enum WallpaperError: Error, CustomStringConvertible {
+    case needsWebKit(WebContentRequest)
+    public var description: String {
+        switch self {
+        case .needsWebKit(.page(let index, _, _)): return "web wallpaper \(index.lastPathComponent) (WebKit)"
+        case .needsWebKit(.video(let url)): return "\(url.lastPathComponent) (WebKit video)"
+        }
+    }
+}
+
+/// project.json properties as WE passes them to `applyUserProperties`: `{name: {type, value}}`, with
+/// values converted to the declared type (project files often store booleans/numbers as strings, e.g.
+/// `"value": "true"`, while pages test `value === true`) and user overrides applied.
+func webProperties(_ project: [String: Any], _ user: UserProperties) -> [String: [String: Any]] {
+    let declared = (project["general"] as? [String: Any])?["properties"] as? [String: Any] ?? [:]
+    var out: [String: [String: Any]] = [:]
+    for (name, raw) in declared {
+        guard let p = raw as? [String: Any] else { continue }
+        let type = (p["type"] as? String ?? "").lowercased()
+        out[name] = ["type": type, "value": typedValue(user.values[name] ?? p["value"] ?? NSNull(), type: type)]
+    }
+    return out
+}
+
+func typedValue(_ v: Any, type: String) -> Any {
+    func isBoolean(_ x: Any) -> Bool { (x as? NSNumber).map { CFGetTypeID($0) == CFBooleanGetTypeID() } ?? false }
+    switch type {
+    case "bool":
+        if isBoolean(v) { return v }
+        if let n = v as? NSNumber { return n.doubleValue != 0 }
+        if let s = v as? String { return s == "true" || s == "1" }
+        return false
+    case "slider":
+        if let n = v as? NSNumber, !isBoolean(n) { return n }
+        if let s = v as? String, let d = Double(s) { return d }
+        return v
+    default: // color ("r g b"), combo (option value), textinput, file, directory...
+        if let n = v as? NSNumber, !isBoolean(n), type == "combo" { return n.stringValue }
+        return v
     }
 }
 

@@ -6,8 +6,11 @@ import VideoToolbox
 public enum VideoError: Error, CustomStringConvertible {
     case unsupported(String)
     case decode(String)
+    /// No decoder outside WebKit (VP8): play it with the WebKit fallback.
+    case needsWebKit(URL)
     public var description: String {
         switch self {
+        case .needsWebKit(let url): return "\(url.lastPathComponent) needs the WebKit video fallback (VP8)"
         case .unsupported(let s): return "unsupported video: \(s)"
         case .decode(let s): return "video decode failed: \(s)"
         }
@@ -96,7 +99,7 @@ final class WebMVideoSource: VideoSource {
             codecType = kCMVideoCodecType_AV1
             atoms["av1C"] = file.codecPrivate
         case "V_VP8":
-            throw VideoError.unsupported("VP8 (no VP8 decoder on macOS; WebKit fallback not implemented yet)")
+            throw VideoError.needsWebKit(url) // no VideoToolbox decoder; WebKit ships its own
         default:
             throw VideoError.unsupported("WebM codec \(file.codecID)")
         }

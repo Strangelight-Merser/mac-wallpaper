@@ -15,8 +15,9 @@ This project does not ship any Wallpaper Engine content. You need your own copy 
 | Shaders | WE's GLSL dialect → SPIR-V (glslang) → MSL (SPIRV-Cross), in-process with a disk cache; 97% of the shipped shaders compile |
 | Scenes | Image layers, effect chains incl. multi-FBO effects (blur, god rays, motion blur, fluid simulation…), blend modes, HDR + bloom, user properties, hidden/cross-layer composites, static-layer caching |
 | Official effect previews | 44 of 45 render (the remaining one needs particles) |
-| Video wallpapers | mp4/mov (H.264, HEVC, AV1) and webm (VP9, AV1), hardware-decoded and drawn zero-copy through Metal; looping, cover-fit. Muted for now; VP8 webm not yet |
-| Not yet | Web wallpapers, VP8 webm, video audio, particles, text, audio response, SceneScript, 3D models, mouse interaction, a wallpaper library UI |
+| Video wallpapers | mp4/mov (H.264, HEVC, AV1) and webm (VP9, AV1), hardware-decoded and drawn zero-copy through Metal; VP8 webm through WebKit; looping, cover-fit. Muted for now |
+| Web wallpapers | WKWebView with Wallpaper Engine's JavaScript API (`wallpaperPropertyListener`: user/general properties, `setPaused`; audio/media listener registration), pages served same-origin; paused pages use no CPU |
+| Not yet | Video audio, audio spectrum for web/scene wallpapers, mouse interaction, particles, text, SceneScript, 3D models, a wallpaper library UI |
 
 The full design, findings and roadmap (in Chinese) are in [docs/design.md](docs/design.md).
 
@@ -48,8 +49,9 @@ directly and change them from the menu-bar icon.
 ```
 
 Cases are listed in [regression/cases.txt](regression/cases.txt) (4 scenes in several variants, every
-official effect preview at two moments, and self-generated test videos — `scripts/make_test_videos.sh`,
-run automatically when needed; requires ffmpeg). References are renders of Wallpaper Engine assets, so they are
+official effect preview at two moments, self-generated test videos — `scripts/make_test_videos.sh`,
+run automatically when needed; requires ffmpeg — and web wallpapers including our own bridge fixture
+in `regression/fixtures/webtest`). References are renders of Wallpaper Engine assets, so they are
 not committed; they are stored in `regression/refs/` (or `$REGRESSION_REFS`). Failing cases get an
 amplified difference image in `regression/diff/`.
 

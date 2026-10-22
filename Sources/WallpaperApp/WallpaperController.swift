@@ -1,8 +1,11 @@
 import AppKit
 import MetalKit
 import WERender
+import WEWeb
 
 /// Owns the shared renderer and one desktop window per screen; decides when frames are drawn.
+/// Web wallpapers (and VP8 videos) instead get one WKWebView per screen, swapped in for the Metal view.
+@MainActor
 final class WallpaperController: NSObject, MTKViewDelegate {
     enum PauseReason: String, CaseIterable {
         case user = "paused by user"
@@ -13,12 +16,21 @@ final class WallpaperController: NSObject, MTKViewDelegate {
 
     let device = MTLCreateSystemDefaultDevice()!
     private(set) var renderer: WallpaperRenderer?
+    /// Set while a web wallpaper / WebKit video is shown.
+    private(set) var webRequest: WebContentRequest?
+    private var webViews: [CGDirectDisplayID: WebWallpaper] = [:]
+    private var webPaused: [CGDirectDisplayID: Bool] = [:]
     private(set) var windows: [DesktopWindow] = []
     private(set) var pauseReasons: Set<PauseReason> = [.loading]
     var onStateChange: (() -> Void)?
     private(set) var loadError: String?
 
-    var fps: Int = 30 { didSet { applyState() } }
+    var fps: Int = 30 {
+        didSet {
+            webViews.values.forEach { $0.setFPS(effectiveFPS) }
+            applyState()
+        }
+    }
 
     // Animation clock that only advances while frames are being drawn.
     private var clock: Double = 0
@@ -60,10 +72,20 @@ final class WallpaperController: NSObject, MTKViewDelegate {
                 // Warm-up frame compiles every shader/pipeline before the first on-screen frame.
                 _ = try r.render(width: 64, height: 36, time: 0)
                 DispatchQueue.main.async {
+                    self.detachWeb()
                     self.renderer = r
                     self.clock = 0
                     for w in r.warnings { log("warning: \(w)") }
                     log(String(format: "ready in %.2fs (%@)", CACurrentMediaTime() - started, r.summary))
+                    self.setPaused(.loading, false)
+                }
+            } catch WallpaperError.needsWebKit(let request) {
+                DispatchQueue.main.async {
+                    self.detachWeb()
+                    self.renderer = nil
+                    self.webRequest = request
+                    self.windows.forEach(self.attachWeb)
+                    log(String(format: "ready in %.2fs (%@)", CACurrentMediaTime() - started, "\(WallpaperError.needsWebKit(request))"))
                     self.setPaused(.loading, false)
                 }
             } catch {
@@ -76,6 +98,25 @@ final class WallpaperController: NSObject, MTKViewDelegate {
         }
     }
 
+    // MARK: - web content
+
+    func attachWeb(_ window: DesktopWindow) {
+        guard let request = webRequest, webViews[window.screenID] == nil else { return }
+        let web = WebWallpaper(request: request, fps: effectiveFPS)
+        web.onWarning = { log("warning (web): \($0)") }
+        web.webView.frame = window.contentLayoutRect
+        window.contentView = web.webView
+        webViews[window.screenID] = web
+        webPaused[window.screenID] = nil
+    }
+
+    func detachWeb() {
+        for w in windows where webViews[w.screenID] != nil { w.contentView = w.metalView }
+        webViews = [:]
+        webPaused = [:]
+        webRequest = nil
+    }
+
     // MARK: - windows
 
     @objc func screensChanged() { rebuildWindows() }
@@ -84,7 +125,7 @@ final class WallpaperController: NSObject, MTKViewDelegate {
         let screens = NSScreen.screens
         windows.removeAll { w in
             let keep = screens.contains { $0.displayID == w.screenID }
-            if !keep { w.close() }
+            if !keep { w.close(); webViews[w.screenID] = nil; webPaused[w.screenID] = nil }
             return !keep
         }
         for screen in screens {
@@ -98,6 +139,7 @@ final class WallpaperController: NSObject, MTKViewDelegate {
                                                    name: NSWindow.didChangeOcclusionStateNotification, object: w)
             w.orderBack(nil)
             windows.append(w)
+            attachWeb(w)
         }
         log("windows: \(windows.count) screen(s): " + screens.map { "\(Int($0.frame.width))x\(Int($0.frame.height))@\($0.backingScaleFactor)x" }.joined(separator: ", "))
         applyState()
@@ -123,6 +165,20 @@ final class WallpaperController: NSObject, MTKViewDelegate {
     func isVisible(_ w: DesktopWindow) -> Bool { w.occlusionState.contains(.visible) }
 
     func applyState() {
+        if webRequest != nil {
+            // Web content: pause each screen's page while paused or fully covered (setPaused only on change).
+            for w in windows {
+                w.metalView.isPaused = true
+                guard let web = webViews[w.screenID] else { continue }
+                let paused = !pauseReasons.isEmpty || !isVisible(w)
+                if webPaused[w.screenID] != paused {
+                    web.setPaused(paused)
+                    webPaused[w.screenID] = paused
+                }
+            }
+            onStateChange?()
+            return
+        }
         let globallyPaused = !pauseReasons.isEmpty || renderer == nil
         for w in windows {
             w.metalView.preferredFramesPerSecond = effectiveFPS
@@ -136,6 +192,11 @@ final class WallpaperController: NSObject, MTKViewDelegate {
     var statusText: String {
         if let e = loadError { return "Error: \(e)" }
         if !pauseReasons.isEmpty { return "Paused (" + pauseReasons.map(\.rawValue).sorted().joined(separator: ", ") + ")" }
+        if let request = webRequest {
+            let showing = webPaused.values.filter { !$0 }.count
+            let kind = if case .video = request { "Video (WebKit)" } else { "Web page" }
+            return showing == 0 ? "\(kind) · paused (desktop covered)" : "\(kind) · showing on \(showing)/\(windows.count) screen(s)"
+        }
         let drawing = windows.filter { !$0.metalView.isPaused }.count
         if drawing == 0 { return "Paused (desktop covered)" }
         return String(format: "Drawing %d/%d screen(s) · %.0f fps · GPU %.1f ms", drawing, windows.count, measuredFPS, gpuMillis)
@@ -143,9 +204,13 @@ final class WallpaperController: NSObject, MTKViewDelegate {
 
     // MARK: - MTKViewDelegate
 
-    func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
+    nonisolated func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
 
-    func draw(in view: MTKView) {
+    nonisolated func draw(in view: MTKView) {
+        MainActor.assumeIsolated { drawFrame(in: view) }
+    }
+
+    func drawFrame(in view: MTKView) {
         guard let renderer, let drawable = view.currentDrawable else { return }
         // Advance the clock once per display refresh, not once per screen.
         let now = CACurrentMediaTime()

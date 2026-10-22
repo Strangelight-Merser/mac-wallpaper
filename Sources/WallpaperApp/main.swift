@@ -4,6 +4,7 @@ import AppKit
 ///
 /// Settings live in UserDefaults (`wallpaper`, `assets`, `fps`); `--wallpaper <dir>` and
 /// `--assets <dir>` on the command line override them (handy for `open MacWallpaper.app --args ...`).
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     let defaults = UserDefaults.standard
     var controller: WallpaperController!
@@ -123,8 +124,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 }
 
-let app = NSApplication.shared
-app.setActivationPolicy(.accessory)
-let delegate = AppDelegate()
-app.delegate = delegate
-app.run()
+// Top-level code runs on the main thread.
+MainActor.assumeIsolated {
+    let app = NSApplication.shared
+    app.setActivationPolicy(.accessory)
+    let delegate = AppDelegate()
+    app.delegate = delegate
+    app.run()
+}

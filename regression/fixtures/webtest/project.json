@@ -1,0 +1,16 @@
+{
+	"file" : "index.html",
+	"title" : "Web bridge test (fixture)",
+	"type" : "web",
+	"general" :
+	{
+		"properties" :
+		{
+			"accent" : { "order" : 0, "text" : "Accent", "type" : "color", "value" : "0.9 0.3 0.1" },
+			"enabled" : { "order" : 1, "text" : "Enabled (stored as a string)", "type" : "bool", "value" : "true" },
+			"size" : { "order" : 2, "text" : "Size (stored as a string)", "type" : "slider", "min" : 0, "max" : 100, "value" : "40" },
+			"mode" : { "order" : 3, "text" : "Mode", "type" : "combo", "value" : "b", "options" : [ { "label" : "A", "value" : "a" }, { "label" : "B", "value" : "b" } ] },
+			"caption" : { "order" : 4, "text" : "Caption", "type" : "textinput", "value" : "hello" }
+		}
+	}
+}
