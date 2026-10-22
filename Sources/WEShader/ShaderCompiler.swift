@@ -1,3 +1,5 @@
+import CShaderTools
+import CryptoKit
 import Foundation
 
 /// Uniform block member as laid out in SPIR-V (offsets are honoured by the generated MSL struct).
@@ -34,16 +36,134 @@ public enum ShaderCompileError: Error, CustomStringConvertible {
     }
 }
 
-/// GLSL → SPIR-V → MSL via the glslang / SPIRV-Cross command-line tools.
-/// Prototype only: the app will link both libraries in-process (see docs/design.md §4.2).
+/// GLSL → SPIR-V → MSL via glslang + SPIRV-Cross. By default both run in-process (CShaderTools); the
+/// command-line tools remain available as a reference (`WE_SHADER_BACKEND=cli`) and for parity checks
+/// (`WE_SHADER_PARITY=1` compiles with both and reports any difference).
 public enum ShaderCompiler {
+    /// Cumulative wall time per stage (seconds) and number of programs compiled — for WE_TIMING.
+    public nonisolated(unsafe) static var timings: [String: Double] = [:]
+    public nonisolated(unsafe) static var programsCompiled = 0
+    public nonisolated(unsafe) static var parityMismatches: [String] = []
+
+    static func timed<T>(_ stage: String, _ body: () throws -> T) rethrows -> T {
+        let t0 = CFAbsoluteTimeGetCurrent()
+        defer { timings[stage, default: 0] += CFAbsoluteTimeGetCurrent() - t0 }
+        return try body()
+    }
+
+    static let environment = ProcessInfo.processInfo.environment
+    static let useCLI = environment["WE_SHADER_BACKEND"] == "cli"
+    static let checkParity = environment["WE_SHADER_PARITY"] != nil
+
+    /// Versions of the in-process compilers (part of the shader cache key).
+    public static let toolsVersion = String(cString: we_shader_tools_version())
+
+    /// Backend output before any of our post-processing: MSL text and JSON reflection per stage.
+    struct RawOutput: Codable, Equatable {
+        let vertexMSL, vertexReflection, fragmentMSL, fragmentReflection: String
+    }
+
+    public static func compile(vertex: String, fragment: String) throws -> CompiledProgram {
+        let key = cacheKey(vertex: vertex, fragment: fragment)
+        if let cached = timed("cache read", { readCache(key) }) {
+            switch cached {
+            case .success(let raw): return program(from: raw)
+            case .failure(let log): throw ShaderCompileError.tool("glslang", log)
+            }
+        }
+        programsCompiled += 1
+        let raw: RawOutput
+        do {
+            raw = try useCLI
+                ? timed("compile (cli)") { try compileCLI(vertex: vertex, fragment: fragment) }
+                : timed("compile (in-process)") { try compileInProcess(vertex: vertex, fragment: fragment) }
+        } catch ShaderCompileError.tool(let stage, let log) {
+            writeCache(key, .failure("\(stage): \(log)"))
+            throw ShaderCompileError.tool(stage, log)
+        }
+        writeCache(key, .success(raw))
+        if checkParity && !useCLI {
+            let reference = try compileCLI(vertex: vertex, fragment: fragment)
+            if reference != raw {
+                let which = [("vertex MSL", reference.vertexMSL == raw.vertexMSL),
+                             ("vertex reflection", reference.vertexReflection == raw.vertexReflection),
+                             ("fragment MSL", reference.fragmentMSL == raw.fragmentMSL),
+                             ("fragment reflection", reference.fragmentReflection == raw.fragmentReflection)]
+                    .filter { !$0.1 }.map(\.0)
+                parityMismatches.append("\(which.joined(separator: ", ")) differ for program #\(programsCompiled)")
+            }
+        }
+        return program(from: raw)
+    }
+
+    // MARK: - disk cache
+
+    /// Bump when the backend invocation changes (flags, MSL version...) to invalidate old entries.
+    static let pipelineRevision = "glsl2msl-1"
+
+    /// `~/Library/Caches/MacWallpaper/shaders`; `WE_SHADER_CACHE=off` disables, any other value is a path.
+    public static let cacheDirectory: URL? = {
+        switch environment["WE_SHADER_CACHE"] {
+        case "off"?: return nil
+        case let path?: return URL(fileURLWithPath: path)
+        case nil:
+            return FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
+                .appendingPathComponent("MacWallpaper/shaders")
+        }
+    }()
+
+    enum CacheEntry: Codable {
+        case success(RawOutput)
+        case failure(String)
+    }
+
+    static func cacheKey(vertex: String, fragment: String) -> String {
+        var h = SHA256()
+        for part in [pipelineRevision, useCLI ? "cli" : toolsVersion, vertex, fragment] {
+            h.update(data: Data(part.utf8))
+            h.update(data: Data([0]))
+        }
+        return h.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
+    static func readCache(_ key: String) -> CacheEntry? {
+        guard let dir = cacheDirectory,
+              let data = try? Data(contentsOf: dir.appendingPathComponent(key + ".json")) else { return nil }
+        return try? JSONDecoder().decode(CacheEntry.self, from: data)
+    }
+
+    static func writeCache(_ key: String, _ entry: CacheEntry) {
+        guard let dir = cacheDirectory, let data = try? JSONEncoder().encode(entry) else { return }
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        // Write-then-rename keeps concurrent readers from seeing partial files.
+        let tmp = dir.appendingPathComponent(key + "." + UUID().uuidString + ".tmp")
+        guard (try? data.write(to: tmp)) != nil else { return }
+        _ = try? FileManager.default.replaceItemAt(dir.appendingPathComponent(key + ".json"), withItemAt: tmp)
+    }
+
+    static func program(from raw: RawOutput) -> CompiledProgram {
+        let vertex = parseStage(msl: raw.vertexMSL, reflection: raw.vertexReflection)
+        let fragment = parseStage(msl: raw.fragmentMSL, reflection: raw.fragmentReflection)
+        return CompiledProgram(vertex: padVertexOutputs(vertex, for: fragment), fragment: fragment)
+    }
+
+    static func compileInProcess(vertex: String, fragment: String) throws -> RawOutput {
+        var out = we_compile_glsl_pair(vertex, fragment)
+        defer { we_shader_output_free(&out) }
+        guard out.ok != 0 else { throw ShaderCompileError.tool("glslang", out.log.map { String(cString: $0) } ?? "") }
+        return RawOutput(vertexMSL: String(cString: out.vertex_msl), vertexReflection: String(cString: out.vertex_reflection),
+                         fragmentMSL: String(cString: out.fragment_msl), fragmentReflection: String(cString: out.fragment_reflection))
+    }
+
+    // MARK: - command-line backend (reference)
+
     static let toolDirs = ["/opt/homebrew/bin", "/usr/local/bin"]
 
     static func tool(_ name: String) -> String {
         toolDirs.map { "\($0)/\(name)" }.first { FileManager.default.isExecutableFile(atPath: $0) } ?? name
     }
 
-    public static func compile(vertex: String, fragment: String) throws -> CompiledProgram {
+    static func compileCLI(vertex: String, fragment: String) throws -> RawOutput {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("weshader-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -58,21 +178,25 @@ public enum ShaderCompiler {
                               ["-V", "-R", "--sdub", "WEUniforms", "0", "0", "--aml", "--amb", "-l",
                                v.path, f.path], cwd: dir)
         guard code == 0 else { throw ShaderCompileError.tool("glslang", log) }
-        var vertex = try cross(dir.appendingPathComponent("vert.spv"), dir: dir)
-        let fragment = try cross(dir.appendingPathComponent("frag.spv"), dir: dir)
-        vertex = padVertexOutputs(vertex, for: fragment)
-        return CompiledProgram(vertex: vertex, fragment: fragment)
+        func cross(_ spv: URL) throws -> (String, String) {
+            let out = spv.deletingPathExtension().appendingPathExtension("metal")
+            var (code, log) = run(tool("spirv-cross"), [spv.path, "--msl", "--msl-version", "20300", "--output", out.path], cwd: dir)
+            guard code == 0 else { throw ShaderCompileError.tool("spirv-cross", log) }
+            let msl = try String(contentsOf: out, encoding: .utf8)
+            (code, log) = run(tool("spirv-cross"), [spv.path, "--reflect"], cwd: dir)
+            guard code == 0 else { throw ShaderCompileError.tool("spirv-cross --reflect", log) }
+            return (msl, log)
+        }
+        let (vm, vr) = try cross(dir.appendingPathComponent("vert.spv"))
+        let (fm, fr) = try cross(dir.appendingPathComponent("frag.spv"))
+        return RawOutput(vertexMSL: vm, vertexReflection: vr, fragmentMSL: fm, fragmentReflection: fr)
     }
 
-    static func cross(_ spv: URL, dir: URL) throws -> CompiledStage {
-        let out = spv.deletingPathExtension().appendingPathExtension("metal")
-        var (code, log) = run(tool("spirv-cross"), [spv.path, "--msl", "--msl-version", "20300", "--output", out.path], cwd: dir)
-        guard code == 0 else { throw ShaderCompileError.tool("spirv-cross", log) }
-        let msl = fixAddressSpaces(try String(contentsOf: out, encoding: .utf8))
-        (code, log) = run(tool("spirv-cross"), [spv.path, "--reflect"], cwd: dir)
-        guard code == 0, let refl = try JSONSerialization.jsonObject(with: Data(log.utf8)) as? [String: Any] else {
-            throw ShaderCompileError.tool("spirv-cross --reflect", log)
-        }
+    // MARK: - parsing
+
+    static func parseStage(msl rawMSL: String, reflection: String) -> CompiledStage {
+        let msl = fixAddressSpaces(rawMSL)
+        let refl = (try? JSONSerialization.jsonObject(with: Data(reflection.utf8))) as? [String: Any] ?? [:]
 
         var members: [UniformMember] = []
         var blockSize = 0

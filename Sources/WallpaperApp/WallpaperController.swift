@@ -51,6 +51,7 @@ final class WallpaperController: NSObject, MTKViewDelegate {
     func load(wallpaper: URL, assets: URL?) {
         setPaused(.loading, true)
         loadError = nil
+        let started = CACurrentMediaTime()
         DispatchQueue.global(qos: .userInitiated).async {
             do {
                 let r = try SceneRenderer(project: wallpaper, assets: assets)
@@ -62,6 +63,7 @@ final class WallpaperController: NSObject, MTKViewDelegate {
                     self.renderer = r
                     self.clock = 0
                     for w in r.warnings { log("warning: \(w)") }
+                    log(String(format: "ready in %.2fs", CACurrentMediaTime() - started))
                     self.setPaused(.loading, false)
                 }
             } catch {

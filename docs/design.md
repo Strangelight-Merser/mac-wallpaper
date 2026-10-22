@@ -319,6 +319,25 @@ AVPlayerLayer   WKWebView + WE JS 桥     │
 2. 开机自启（SMAppService）；实测多显示器和遮挡暂停。
 3. 开源发布：README、构建说明、release 包。
 
+## 6.13 Shader 编译进程内化 + 磁盘缓存（2026-10-22，阶段一第 2 项）
+
+- **集成方式**：glslang 16.6.0 和 SPIRV-Cross vulkan-sdk-1.4.363.0 以浅克隆的 git submodule 放在 `ThirdParty/`，固定在与当初 shader 批量测试相同的版本；SwiftPM C++ target `CShaderTools` 通过符号链接编译两者的源码（`ENABLE_SPIRV`、`GLSLANG_OSINCLUDE_UNIX`，不含 HLSL 前端和 SPIRV-Tools），对 Swift 只暴露一个 C 接口 `we_compile_glsl_pair()`。`build_info.h` 用 glslang 自带脚本生成后提交到仓库。
+- **与 CLI 字节级一致**：glslang 端逐项复刻 StandAlone.cpp 对 `-V -R --sdub WEUniforms 0 0 --aml --amb -l` 的处理（含 `mapIO()`）；SPIRV-Cross 端直接 `#include` 它的 `main.cpp`，调用 CLI 自己的 `compile_iteration()`，选项默认值与命令行完全一致。确认 GLSL 输入在不加 `-O` 时不会跑优化器，所以不需要 SPIRV-Tools。`WE_SHADER_PARITY=1` 会对每个程序同时用两条路径编译并比较：**167 个程序（4 个场景 + 全部特效预览）0 差异**。
+- **磁盘缓存**：`~/Library/Caches/MacWallpaper/shaders/<sha256>.json`，key = 流水线版本 + 编译器版本 + 两个阶段的源码；缓存的是后端的原始输出（MSL + 反射 JSON），我们自己的后处理（地址空间修正、顶点输出补齐）每次重新做，所以修改后处理不需要清缓存。编译失败的结果也会缓存（兼容性改写的重试路径不会每次启动都重编失败的版本）。写入方式是先写临时文件再改名，并发读取是安全的。`WE_SHADER_CACHE=off` 关闭缓存，填路径则改用该目录。
+- **CLI 后端保留**（`WE_SHADER_BACKEND=cli`），只用于对照；默认路径不再依赖 Homebrew。
+
+**实测（razer_bedroom，11 个程序）**
+
+| | CLI 工具 | 进程内，冷启动 | 进程内，缓存命中 |
+|---|---|---|---|
+| App：开始加载 → 就绪 | 0.70–0.76 s | **0.26 s** | **0.22 s** |
+| `wecli render`（单帧） | 4.6 s | **0.35 s** | **0.31 s** |
+| 其中 shader 编译 | 4.16 s | 0.05 s | 0 |
+
+- 每个程序的编译从约 400 ms（5 次子进程）降到约 4.5 ms。CLI 的成本主要是启动子进程，而且它随父进程的启动方式波动很大：从 App 里启动每次约 13 ms，从命令行工具里约 75 ms。进程内编译把这一波动也消除了。剩下的约 0.2 s 是贴图加载和渲染本身，以后如有需要再优化。
+- 4 个场景、44 个特效预览与 CLI 时代的输出逐像素一致。
+- 代价：干净构建多约 25 秒（编译这两个库），增量构建不受影响。
+
 ## 7. 待确认
 1. 最低系统版本：建议 macOS 14（SMAppService、ScreenCaptureKit 音频成熟）。
 2. 工程形态：目前采用 SwiftPM + 生成 .app 的脚本（§6.11）；到需要正式签名分发时，再考虑加一个 Xcode 工程来包装。

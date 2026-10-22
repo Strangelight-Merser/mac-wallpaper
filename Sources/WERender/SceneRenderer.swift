@@ -901,8 +901,10 @@ public final class SceneRenderer {
         for (n, _) in compiled.vertex.attributes where n != "a_Position" && n != "a_TexCoord" {
             warn("\(shader): vertex attribute \(n) not supplied")
         }
+        let t0 = CFAbsoluteTimeGetCurrent()
         let p = Program(compiled: compiled, vertexFunction: try lib(compiled.vertex.msl),
                         fragmentFunction: try lib(compiled.fragment.msl), annotations: v.uniforms + f.uniforms)
+        ShaderCompiler.timings["metal makeLibrary", default: 0] += CFAbsoluteTimeGetCurrent() - t0
         programs[key] = p
         return p
     }

@@ -5,6 +5,7 @@ import Metal
 import UniformTypeIdentifiers
 import WEFormat
 import WERender
+import WEShader
 
 func usage() -> Never {
     print("""
@@ -192,6 +193,14 @@ case "render":
     try writePNG(img, to: URL(fileURLWithPath: out))
     print(String(format: "rendered %d layer(s) in %.2fs -> %@", renderer.scene.layers.count, Date().timeIntervalSince(start), out))
     for w in Set(renderer.warnings).sorted() { print("  warning: \(w)") }
+    if ProcessInfo.processInfo.environment["WE_SHADER_PARITY"] != nil {
+        print("  shader parity: \(ShaderCompiler.programsCompiled) program(s), \(ShaderCompiler.parityMismatches.count) mismatch(es)")
+        ShaderCompiler.parityMismatches.forEach { print("    \($0)") }
+    }
+    if ProcessInfo.processInfo.environment["WE_TIMING"] != nil {
+        print("  programs compiled: \(ShaderCompiler.programsCompiled)")
+        for (k, v) in ShaderCompiler.timings.sorted(by: { $0.key < $1.key }) { print(String(format: "  %@: %.2fs", k, v)) }
+    }
 
 case "scene":
     // Dump the parsed scene: layers, passes, targets, binds and effect FBOs.
