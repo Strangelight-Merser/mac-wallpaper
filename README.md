@@ -38,6 +38,19 @@ git submodule update --init --depth 1
 The `--wallpaper`/`--assets` paths are remembered; afterwards you can open `.build/MacWallpaper.app`
 directly and change them from the menu-bar icon.
 
+## Regression tests
+
+```bash
+./scripts/regress.sh --update   # once: render references from your own Wallpaper Engine assets
+./scripts/regress.sh            # render all cases, compare pixels + warnings, one PASS/FAIL summary
+./scripts/regress.sh 'beach'    # only cases whose name matches the regex
+```
+
+Cases are listed in [regression/cases.txt](regression/cases.txt) (4 scenes in several variants plus every
+official effect preview at two moments). References are renders of Wallpaper Engine assets, so they are
+not committed; they are stored in `regression/refs/` (or `$REGRESSION_REFS`). Failing cases get an
+amplified difference image in `regression/diff/`.
+
 ## Command-line tool
 
 `wecli` (in `.build/release/`) is used for development and testing:
@@ -47,6 +60,7 @@ wecli render <wallpaper> --assets <assets> --time 3 --out frame.png   # offline 
 wecli bench  <wallpaper> --assets <assets> --fps 30                   # CPU/GPU cost per frame
 wecli scene  <wallpaper> --assets <assets>                            # dump layers, passes, effect FBOs
 wecli verify <folder>                                                 # decode every .tex, compare with sibling .png
+wecli compare a.png b.png [--diff d.png]                              # exact pixel comparison (exit 0 = equal)
 ```
 
 ## License

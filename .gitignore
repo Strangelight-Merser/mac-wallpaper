@@ -12,3 +12,8 @@ xcuserdata/
 __pycache__/
 *.pyc
 .DS_Store
+
+# Regression run output and local references (renders of WE assets, not committed)
+regression/refs/
+regression/current/
+regression/diff/

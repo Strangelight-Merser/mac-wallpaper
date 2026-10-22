@@ -296,8 +296,8 @@ AVPlayerLayer   WKWebView + WE JS 桥     │
 
 **阶段一：打牢基础**
 1. 正确性：`TEX<n>FORMAT` 填实际格式；sRGB 贴图；pass `conditions`、fbo `clear`、`compose`。
-2. shader 编译改为进程内调用 glslang/SPIRV-Cross，并加磁盘缓存（去掉对 Homebrew 的依赖，二次启动接近瞬时）。
-3. 回归测试集：现有样本 + 特效预览 + 自己生成的视频；把逐像素回归脚本化。
+2. ✅ shader 编译改为进程内调用 glslang/SPIRV-Cross，并加磁盘缓存（§6.13）。
+3. ✅ 回归测试集：`scripts/regress.sh`（§6.14）；视频用例等到 M1 做视频壁纸时再加。
 
 **阶段一第 1 项进展（2026-10-22）**
 - ✅ `TEX<n>FORMAT` 填为绑定贴图的实际格式（材质里显式写了的仍以材质为准）；已确认能传进 shader，例如 cloudmotion 的 R8 遮罩编译出 `TEX1FORMAT=9`。现有场景和预览的输出都没有变化，这是对的：会受格式影响的 shader 是粒子（genericparticle、ropeparticle）、fur4（模型）和 lightshafts（其预览里绑的都是 RGBA 贴图）。粒子做起来以后这一项才真正生效。
@@ -337,6 +337,17 @@ AVPlayerLayer   WKWebView + WE JS 桥     │
 - 每个程序的编译从约 400 ms（5 次子进程）降到约 4.5 ms。CLI 的成本主要是启动子进程，而且它随父进程的启动方式波动很大：从 App 里启动每次约 13 ms，从命令行工具里约 75 ms。进程内编译把这一波动也消除了。剩下的约 0.2 s 是贴图加载和渲染本身，以后如有需要再优化。
 - 4 个场景、44 个特效预览与 CLI 时代的输出逐像素一致。
 - 代价：干净构建多约 25 秒（编译这两个库），增量构建不受影响。
+
+## 6.14 回归测试脚本（2026-10-22，阶段一第 3 项）
+
+`scripts/regress.sh [--update] [--jobs N] [--no-build] [过滤正则]`
+- 用例清单 `regression/cases.txt`（提交到仓库），共 99 个：4 个场景的 9 个变体（首帧、走静态图层缓存的帧、关闭 bloom、用户属性、竖屏 cover 适配等），加上 45 个官方特效预览各取 t=1、t=2.5 两个时刻。
+- 每个用例比较两样东西：**像素**（新增的 `wecli compare`，默认要求完全一致，失败时输出放大后的差异图到 `regression/diff/`）和**排序后的警告列表**（新增警告也算回归——当初 `warn()` 吞掉所有警告的 bug 正是这类问题）。
+- 参考图是用 WE 素材渲染出来的，属于衍生内容，**不提交**，放在被 gitignore 的 `regression/refs/`（或 `$REGRESSION_REFS` 指定的目录）。拿到仓库的人可以用自己的 WE 素材 `--update` 生成参考图。仓库里只提交用例清单和脚本。
+- 用例并行执行（默认等于性能核心数），99 个用例约 5 秒跑完；最后输出一行汇总，失败、缺参考图或出错时退出码为 1。
+- 当前这套参考图已经和此前人工目视确认过的输出做了核对：4 个场景、45 个特效预览全部逐像素一致。
+- **验证过三条路径**：①正常全部通过 99/99；②临时故意改坏渲染器（改混合因子 + 删掉 `g_Frametime` 内建 uniform）→ 93 个用例失败，其中 cursorripple/fluidsimulation 准确报出新增的 `no value for g_Frametime` 警告，vortex 这种只有 0.49% 像素变化的也能抓到；还原后恢复 99/99；③参考图缺失 → 报 MISSING 并判定失败。
+- `scripts/render_effect_previews.sh` 保留，用于生成供目视检查的拼图；`scripts/shader_batch.py` 仍走 CLI，只用于 shader 覆盖率统计。
 
 ## 7. 待确认
 1. 最低系统版本：建议 macOS 14（SMAppService、ScreenCaptureKit 音频成熟）。

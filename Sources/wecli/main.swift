@@ -15,6 +15,7 @@ func usage() -> Never {
       wecli verify  <dir>            decode every .tex and compare with sibling .png
       wecli pkg     <scene.pkg> [outdir]
       wecli scene   <wallpaper dir> [--assets <dir>]   dump layers / passes / effect FBOs
+      wecli compare <a.png> <b.png> [--tolerance N] [--diff out.png]   exit 0 = match, 1 = differ
       wecli bench   <wallpaper dir> --assets <dir> [--size WxH] [--frames N] [--cache off] [--layers a,b] [--bloom off] [--fps N]
       wecli render  <wallpaper dir> --assets <WE assets dir> [--time t] [--size WxH] [--prop name=value]...
                     [--layers a,b] [--bloom off] [--cache off] [--warm t] [--target _rt_name] --out <out.png>
@@ -223,6 +224,39 @@ case "scene":
         }
     }
     scene.notes.forEach { print("note: \($0)") }
+
+case "compare":
+    // Pixel comparison for regression tests: exit 0 = within tolerance, 1 = different, 2 = unreadable.
+    guard args.count >= 4 else { usage() }
+    var opts: [String: String] = [:]
+    var i = 4
+    while i + 1 < args.count { opts[args[i]] = args[i + 1]; i += 2 }
+    let tolerance = Int(opts["--tolerance"] ?? "0") ?? 0
+    guard let a = loadRGBA(URL(fileURLWithPath: args[2])), let b = loadRGBA(URL(fileURLWithPath: args[3])) else {
+        print("unreadable image"); exit(2)
+    }
+    guard a.w == b.w, a.h == b.h else { print("size differs: \(a.w)x\(a.h) vs \(b.w)x\(b.h)"); exit(1) }
+    var maxDiff = 0, sum = 0, over = 0
+    var diff = [UInt8](repeating: 255, count: a.px.count)
+    for p in stride(from: 0, to: a.px.count, by: 4) {
+        var pixelMax = 0
+        for c in 0..<3 {
+            let d = abs(Int(a.px[p + c]) - Int(b.px[p + c]))
+            pixelMax = max(pixelMax, d); sum += d
+        }
+        maxDiff = max(maxDiff, pixelMax)
+        if pixelMax > tolerance { over += 1 }
+        // Amplified difference image: black = equal, brighter = larger difference.
+        let v = UInt8(min(255, pixelMax * 8))
+        diff[p] = v; diff[p + 1] = v; diff[p + 2] = v
+    }
+    let pixels = a.px.count / 4
+    print(String(format: "max %d, mean %.4f, pixels over tolerance: %d (%.3f%%)", maxDiff,
+                 Double(sum) / Double(pixels * 3), over, 100 * Double(over) / Double(pixels)))
+    if over > 0, let path = opts["--diff"], let img = rgbaImage(diff, a.w, a.h) {
+        try writePNG(img, to: URL(fileURLWithPath: path))
+    }
+    exit(over == 0 ? 0 : 1)
 
 case "bench":
     // Encode N frames as the app would (≤3 in flight), reporting CPU encode time and GPU time per frame.

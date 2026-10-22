@@ -1,0 +1,106 @@
+# Regression cases: <name> <wallpaper path relative to $SAMPLES> <wecli render options...>
+# All cases render with `--assets $SAMPLES/wallpaper_engine/assets`. Lines starting with # are ignored.
+#
+# Scenes: first frame (builds the static-layer caches) and a later frame rendered after a warm-up
+# frame (uses the caches), at a size that is not the canvas aspect ratio (cover-fit path).
+scene/razer_bedroom                 razer_bedroom                                        --time 3
+scene/razer_bedroom.cached          razer_bedroom                                        --time 3 --warm 1
+scene/razer_bedroom.nobloom         razer_bedroom                                        --time 3 --bloom off
+scene/razer_vortex                  razer_vortex                                         --time 3
+scene/razer_vortex.cached           razer_vortex                                         --time 7.5 --warm 1
+scene/razer_vortex.props            razer_vortex                                         --time 3 --size 960x540 --prop ui_editor_properties_speed=-1 --prop ui_editor_properties_brightness=5
+scene/beach                         wallpaper_engine/projects/defaultprojects/beach       --time 3
+scene/beach.portrait                wallpaper_engine/projects/defaultprojects/beach       --time 3 --size 720x1280
+scene/deep_space                    wallpaper_engine/projects/defaultprojects/deep_space  --time 3
+#
+# Official effect previews (assets/effects/*/preview), two moments each, after a warm-up frame.
+effect/blend.t1                     wallpaper_engine/assets/effects/blend/preview        --time 1 --warm 0.5 --size 256x256
+effect/blend.t2.5                   wallpaper_engine/assets/effects/blend/preview        --time 2.5 --warm 0.5 --size 256x256
+effect/blendgradient.t1             wallpaper_engine/assets/effects/blendgradient/preview --time 1 --warm 0.5 --size 256x256
+effect/blendgradient.t2.5           wallpaper_engine/assets/effects/blendgradient/preview --time 2.5 --warm 0.5 --size 256x256
+effect/blur.t1                      wallpaper_engine/assets/effects/blur/preview         --time 1 --warm 0.5 --size 256x256
+effect/blur.t2.5                    wallpaper_engine/assets/effects/blur/preview         --time 2.5 --warm 0.5 --size 256x256
+effect/blurprecise.t1               wallpaper_engine/assets/effects/blurprecise/preview  --time 1 --warm 0.5 --size 256x256
+effect/blurprecise.t2.5             wallpaper_engine/assets/effects/blurprecise/preview  --time 2.5 --warm 0.5 --size 256x256
+effect/blurradial.t1                wallpaper_engine/assets/effects/blurradial/preview   --time 1 --warm 0.5 --size 256x256
+effect/blurradial.t2.5              wallpaper_engine/assets/effects/blurradial/preview   --time 2.5 --warm 0.5 --size 256x256
+effect/chromaticaberration.t1       wallpaper_engine/assets/effects/chromaticaberration/preview --time 1 --warm 0.5 --size 256x256
+effect/chromaticaberration.t2.5     wallpaper_engine/assets/effects/chromaticaberration/preview --time 2.5 --warm 0.5 --size 256x256
+effect/cloudmotion.t1               wallpaper_engine/assets/effects/cloudmotion/preview  --time 1 --warm 0.5 --size 256x256
+effect/cloudmotion.t2.5             wallpaper_engine/assets/effects/cloudmotion/preview  --time 2.5 --warm 0.5 --size 256x256
+effect/clouds.t1                    wallpaper_engine/assets/effects/clouds/preview       --time 1 --warm 0.5 --size 256x256
+effect/clouds.t2.5                  wallpaper_engine/assets/effects/clouds/preview       --time 2.5 --warm 0.5 --size 256x256
+effect/colorkey.t1                  wallpaper_engine/assets/effects/colorkey/preview     --time 1 --warm 0.5 --size 256x256
+effect/colorkey.t2.5                wallpaper_engine/assets/effects/colorkey/preview     --time 2.5 --warm 0.5 --size 256x256
+effect/cursorripple.t1              wallpaper_engine/assets/effects/cursorripple/preview --time 1 --warm 0.5 --size 256x256
+effect/cursorripple.t2.5            wallpaper_engine/assets/effects/cursorripple/preview --time 2.5 --warm 0.5 --size 256x256
+effect/depthparallax.t1             wallpaper_engine/assets/effects/depthparallax/preview --time 1 --warm 0.5 --size 256x256
+effect/depthparallax.t2.5           wallpaper_engine/assets/effects/depthparallax/preview --time 2.5 --warm 0.5 --size 256x256
+effect/edgedetection.t1             wallpaper_engine/assets/effects/edgedetection/preview --time 1 --warm 0.5 --size 256x256
+effect/edgedetection.t2.5           wallpaper_engine/assets/effects/edgedetection/preview --time 2.5 --warm 0.5 --size 256x256
+effect/filmgrain.t1                 wallpaper_engine/assets/effects/filmgrain/preview    --time 1 --warm 0.5 --size 256x256
+effect/filmgrain.t2.5               wallpaper_engine/assets/effects/filmgrain/preview    --time 2.5 --warm 0.5 --size 256x256
+effect/fire.t1                      wallpaper_engine/assets/effects/fire/preview         --time 1 --warm 0.5 --size 256x256
+effect/fire.t2.5                    wallpaper_engine/assets/effects/fire/preview         --time 2.5 --warm 0.5 --size 256x256
+effect/fisheye.t1                   wallpaper_engine/assets/effects/fisheye/preview      --time 1 --warm 0.5 --size 256x256
+effect/fisheye.t2.5                 wallpaper_engine/assets/effects/fisheye/preview      --time 2.5 --warm 0.5 --size 256x256
+effect/fluidsimulation.t1           wallpaper_engine/assets/effects/fluidsimulation/preview --time 1 --warm 0.5 --size 256x256
+effect/fluidsimulation.t2.5         wallpaper_engine/assets/effects/fluidsimulation/preview --time 2.5 --warm 0.5 --size 256x256
+effect/foliagesway.t1               wallpaper_engine/assets/effects/foliagesway/preview  --time 1 --warm 0.5 --size 256x256
+effect/foliagesway.t2.5             wallpaper_engine/assets/effects/foliagesway/preview  --time 2.5 --warm 0.5 --size 256x256
+effect/glitter.t1                   wallpaper_engine/assets/effects/glitter/preview      --time 1 --warm 0.5 --size 256x256
+effect/glitter.t2.5                 wallpaper_engine/assets/effects/glitter/preview      --time 2.5 --warm 0.5 --size 256x256
+effect/godrays.t1                   wallpaper_engine/assets/effects/godrays/preview      --time 1 --warm 0.5 --size 256x256
+effect/godrays.t2.5                 wallpaper_engine/assets/effects/godrays/preview      --time 2.5 --warm 0.5 --size 256x256
+effect/iris.t1                      wallpaper_engine/assets/effects/iris/preview         --time 1 --warm 0.5 --size 256x256
+effect/iris.t2.5                    wallpaper_engine/assets/effects/iris/preview         --time 2.5 --warm 0.5 --size 256x256
+effect/lightshafts.t1               wallpaper_engine/assets/effects/lightshafts/preview  --time 1 --warm 0.5 --size 256x256
+effect/lightshafts.t2.5             wallpaper_engine/assets/effects/lightshafts/preview  --time 2.5 --warm 0.5 --size 256x256
+effect/localcontrast.t1             wallpaper_engine/assets/effects/localcontrast/preview --time 1 --warm 0.5 --size 256x256
+effect/localcontrast.t2.5           wallpaper_engine/assets/effects/localcontrast/preview --time 2.5 --warm 0.5 --size 256x256
+effect/motionblur.t1                wallpaper_engine/assets/effects/motionblur/preview   --time 1 --warm 0.5 --size 256x256
+effect/motionblur.t2.5              wallpaper_engine/assets/effects/motionblur/preview   --time 2.5 --warm 0.5 --size 256x256
+effect/nitro.t1                     wallpaper_engine/assets/effects/nitro/preview        --time 1 --warm 0.5 --size 256x256
+effect/nitro.t2.5                   wallpaper_engine/assets/effects/nitro/preview        --time 2.5 --warm 0.5 --size 256x256
+effect/opacity.t1                   wallpaper_engine/assets/effects/opacity/preview      --time 1 --warm 0.5 --size 256x256
+effect/opacity.t2.5                 wallpaper_engine/assets/effects/opacity/preview      --time 2.5 --warm 0.5 --size 256x256
+effect/perspective.t1               wallpaper_engine/assets/effects/perspective/preview  --time 1 --warm 0.5 --size 256x256
+effect/perspective.t2.5             wallpaper_engine/assets/effects/perspective/preview  --time 2.5 --warm 0.5 --size 256x256
+effect/pulse.t1                     wallpaper_engine/assets/effects/pulse/preview        --time 1 --warm 0.5 --size 256x256
+effect/pulse.t2.5                   wallpaper_engine/assets/effects/pulse/preview        --time 2.5 --warm 0.5 --size 256x256
+effect/reflection.t1                wallpaper_engine/assets/effects/reflection/preview   --time 1 --warm 0.5 --size 256x256
+effect/reflection.t2.5              wallpaper_engine/assets/effects/reflection/preview   --time 2.5 --warm 0.5 --size 256x256
+effect/refraction.t1                wallpaper_engine/assets/effects/refraction/preview   --time 1 --warm 0.5 --size 256x256
+effect/refraction.t2.5              wallpaper_engine/assets/effects/refraction/preview   --time 2.5 --warm 0.5 --size 256x256
+effect/scroll.t1                    wallpaper_engine/assets/effects/scroll/preview       --time 1 --warm 0.5 --size 256x256
+effect/scroll.t2.5                  wallpaper_engine/assets/effects/scroll/preview       --time 2.5 --warm 0.5 --size 256x256
+effect/shake.t1                     wallpaper_engine/assets/effects/shake/preview        --time 1 --warm 0.5 --size 256x256
+effect/shake.t2.5                   wallpaper_engine/assets/effects/shake/preview        --time 2.5 --warm 0.5 --size 256x256
+effect/shimmer.t1                   wallpaper_engine/assets/effects/shimmer/preview      --time 1 --warm 0.5 --size 256x256
+effect/shimmer.t2.5                 wallpaper_engine/assets/effects/shimmer/preview      --time 2.5 --warm 0.5 --size 256x256
+effect/shine.t1                     wallpaper_engine/assets/effects/shine/preview        --time 1 --warm 0.5 --size 256x256
+effect/shine.t2.5                   wallpaper_engine/assets/effects/shine/preview        --time 2.5 --warm 0.5 --size 256x256
+effect/skew.t1                      wallpaper_engine/assets/effects/skew/preview         --time 1 --warm 0.5 --size 256x256
+effect/skew.t2.5                    wallpaper_engine/assets/effects/skew/preview         --time 2.5 --warm 0.5 --size 256x256
+effect/spin.t1                      wallpaper_engine/assets/effects/spin/preview         --time 1 --warm 0.5 --size 256x256
+effect/spin.t2.5                    wallpaper_engine/assets/effects/spin/preview         --time 2.5 --warm 0.5 --size 256x256
+effect/swing.t1                     wallpaper_engine/assets/effects/swing/preview        --time 1 --warm 0.5 --size 256x256
+effect/swing.t2.5                   wallpaper_engine/assets/effects/swing/preview        --time 2.5 --warm 0.5 --size 256x256
+effect/tint.t1                      wallpaper_engine/assets/effects/tint/preview         --time 1 --warm 0.5 --size 256x256
+effect/tint.t2.5                    wallpaper_engine/assets/effects/tint/preview         --time 2.5 --warm 0.5 --size 256x256
+effect/transform.t1                 wallpaper_engine/assets/effects/transform/preview    --time 1 --warm 0.5 --size 256x256
+effect/transform.t2.5               wallpaper_engine/assets/effects/transform/preview    --time 2.5 --warm 0.5 --size 256x256
+effect/twirl.t1                     wallpaper_engine/assets/effects/twirl/preview        --time 1 --warm 0.5 --size 256x256
+effect/twirl.t2.5                   wallpaper_engine/assets/effects/twirl/preview        --time 2.5 --warm 0.5 --size 256x256
+effect/watercaustics.t1             wallpaper_engine/assets/effects/watercaustics/preview --time 1 --warm 0.5 --size 256x256
+effect/watercaustics.t2.5           wallpaper_engine/assets/effects/watercaustics/preview --time 2.5 --warm 0.5 --size 256x256
+effect/waterflow.t1                 wallpaper_engine/assets/effects/waterflow/preview    --time 1 --warm 0.5 --size 256x256
+effect/waterflow.t2.5               wallpaper_engine/assets/effects/waterflow/preview    --time 2.5 --warm 0.5 --size 256x256
+effect/waterripple.t1               wallpaper_engine/assets/effects/waterripple/preview  --time 1 --warm 0.5 --size 256x256
+effect/waterripple.t2.5             wallpaper_engine/assets/effects/waterripple/preview  --time 2.5 --warm 0.5 --size 256x256
+effect/waterwaves.t1                wallpaper_engine/assets/effects/waterwaves/preview   --time 1 --warm 0.5 --size 256x256
+effect/waterwaves.t2.5              wallpaper_engine/assets/effects/waterwaves/preview   --time 2.5 --warm 0.5 --size 256x256
+effect/xray.t1                      wallpaper_engine/assets/effects/xray/preview         --time 1 --warm 0.5 --size 256x256
+effect/xray.t2.5                    wallpaper_engine/assets/effects/xray/preview         --time 2.5 --warm 0.5 --size 256x256
+effect/vhs.t1                       wallpaper_engine/assets/effects/vhs/previewvhs       --time 1 --warm 0.5 --size 256x256
+effect/vhs.t2.5                     wallpaper_engine/assets/effects/vhs/previewvhs       --time 2.5 --warm 0.5 --size 256x256
