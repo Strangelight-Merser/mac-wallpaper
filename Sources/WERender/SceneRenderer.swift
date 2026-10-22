@@ -176,7 +176,16 @@ public final class SceneRenderer {
     /// Per-layer pass lists with the effectpassthrough pass appended and blending moved to the last
     /// pass — computed once, not per frame (it reads JSON from disk).
     lazy var layerPasses: [[SceneDescription.Pass]] = scene.layers.map { layer in
-        var passes = layer.passes
+        // Passes whose `conditions` fail are dropped; failing binds are removed.
+        var passes = layer.passes.compactMap { pass -> SceneDescription.Pass? in
+            guard let combos = try? effectiveCombos(pass),
+                  SceneDescription.conditionsHold(pass.conditions, combos: combos) else { return nil }
+            var p = pass
+            for (slot, c) in pass.bindConditions where !SceneDescription.conditionsHold(c, combos: combos) {
+                p.binds[slot] = nil
+            }
+            return p
+        }
         if layer.colorBlendMode > 0 {
             let mps = (try? locator.json("materials/util/effectpassthrough.json"))?["passes"] as? [[String: Any]] ?? []
             for mp in mps {
@@ -252,10 +261,12 @@ public final class SceneRenderer {
         d.storageMode = .private
         let t = device.makeTexture(descriptor: d)!
         t.label = key
-        let lt = wrap(t, clamp: def.clamp)
+        var lt = wrap(t, clamp: def.clamp)
+        lt.formatCode = ["rg88": 8, "r8": 9, "rg1616f": 10, "r16f": 11][def.format] ?? 0
         effectTargets[key] = lt
         // New GPU memory is undefined; feedback effects (ripples, motion blur) read it before writing.
-        _ = encoder(for: t, clear: MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0))
+        let c = def.clearColor
+        _ = encoder(for: t, clear: MTLClearColor(red: Double(c.x), green: Double(c.y), blue: Double(c.z), alpha: Double(c.w)))
         endEncoding()
         return lt
     }
@@ -264,6 +275,23 @@ public final class SceneRenderer {
     /// - a pass with a `target` renders into that FBO, which becomes the input of the next pass;
     ///   `previous` binds refer to the input at the start of such a target sequence;
     /// - other passes ping-pong between the layer's two composite FBOs; the last one draws into the scene.
+    /// Combos a pass's `conditions` are evaluated against: the shader's declared defaults, then the
+    /// effect instance's combos, then the pass's own.
+    var shaderDefaultCombos: [String: [String: Int]] = [:]
+    var activeEffectFBOs: [String: [SceneDescription.EffectFBO]] = [:]
+
+    func effectiveCombos(_ pass: SceneDescription.Pass) throws -> [String: Int] {
+        guard pass.copy == nil, !pass.shader.isEmpty else { return pass.effectCombos }
+        if shaderDefaultCombos[pass.shader] == nil {
+            shaderDefaultCombos[pass.shader] = ShaderPreprocessor.scan(try locator.string("shaders/\(pass.shader).vert")).combos
+                .merging(ShaderPreprocessor.scan(try locator.string("shaders/\(pass.shader).frag")).combos) { a, _ in a }
+        }
+        var c = shaderDefaultCombos[pass.shader]!
+        for (k, v) in pass.effectCombos { c[k] = v }
+        for (k, v) in pass.combos { c[k.uppercased()] = v }
+        return c
+    }
+
     /// File order, except that a layer's `dependencies` are rendered before it.
     lazy var renderOrder: [Int] = {
         var order: [Int] = [], done = Set<Int>(), visiting = Set<Int>()
@@ -305,7 +333,15 @@ public final class SceneRenderer {
         func scope(for pass: SceneDescription.Pass) -> [String: LoadedTexture] {
             guard let e = pass.effect, e < layer.effectFBOs.count else { return [:] }
             var s: [String: LoadedTexture] = [:]
-            for def in layer.effectFBOs[e] { s[def.name] = effectTarget(index, e, def, layerSize: size) }
+            let key = "L\(index).E\(e)"
+            if activeEffectFBOs[key] == nil {
+                // FBO `conditions` never change at runtime: evaluate once per layer × effect.
+                let combos = (try? effectiveCombos(pass)) ?? pass.effectCombos
+                activeEffectFBOs[key] = layer.effectFBOs[e].filter {
+                    SceneDescription.conditionsHold($0.conditions, combos: combos)
+                }
+            }
+            for def in activeEffectFBOs[key]! { s[def.name] = effectTarget(index, e, def, layerSize: size) }
             return s
         }
 
@@ -486,6 +522,11 @@ public final class SceneRenderer {
                 combos[combo.uppercased()] = 1
             }
         }
+        // TEX<n>FORMAT = the bound texture's real format, so ConvertTextureFormat()/DecompressNormal()
+        // expand R8/RG88 and decode DXT normal maps as WE does (materials may still override).
+        for (slot, src) in sources {
+            if case .fixed(let t) = src, combos["TEX\(slot)FORMAT"] == nil { combos["TEX\(slot)FORMAT"] = t.formatCode }
+        }
         let program = try self.program(shader: pass.shader, combos: combos)
         let pkey = programKey(pass.shader, combos)
 
@@ -559,7 +600,7 @@ public final class SceneRenderer {
     func execute(_ plan: PassPlan, previous: LoadedTexture?, bindPrevious: LoadedTexture? = nil, target: MTLTexture, clear: Bool,
                  mvp: simd_float4x4, half: SIMD2<Float>, first: Bool) throws {
         if Self.trace {
-            print("  pass \(plan.label) -> \(target.label ?? "?") \(target.width)x\(target.height) clear=\(clear) inputs=\(plan.inputs.sorted { $0.key < $1.key }.map { "\($0.key):\($0.value)" })")
+            print("  pass \(plan.label) [\(plan.programKey)] -> \(target.label ?? "?") \(target.width)x\(target.height) clear=\(clear) inputs=\(plan.inputs.sorted { $0.key < $1.key }.map { "\($0.key):\($0.value)" })")
         }
         // Resolve this frame's inputs (render targets may be re-created on resize).
         var inputs: [Int: LoadedTexture] = [:]

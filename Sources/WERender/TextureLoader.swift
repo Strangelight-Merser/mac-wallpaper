@@ -10,6 +10,9 @@ public struct LoadedTexture {
     public let textureSize: SIMD2<Float>  // allocated (power-of-two padded) size
     public let imageSize: SIMD2<Float>    // meaningful image region
     public let clamp: Bool
+    /// WE `FORMAT_*` code (common_fragment.h) shaders see as `TEX<n>FORMAT`: 0 RGBA8888, 4 DXT5,
+    /// 6 DXT3, 7 DXT1, 8 RG88, 9 R8, 10 RG1616F, 11 R16F.
+    public var formatCode: Int = 0
 }
 
 enum TextureLoader {
@@ -58,10 +61,21 @@ enum TextureLoader {
         case .mp4:
             throw WEFormatError.unsupported("\(name): video textures")
         }
+        var formatCode = 0 // embedded PNG/JPEG decode to RGBA
+        if case .raw(let f) = top.payload {
+            switch f {
+            case .rgba8888: formatCode = 0
+            case .dxt5: formatCode = 4
+            case .dxt3: formatCode = 6
+            case .dxt1: formatCode = 7
+            case .rg88: formatCode = 8
+            case .r8: formatCode = 9
+            }
+        }
         return LoadedTexture(texture: texture,
                              textureSize: allocated,
                              imageSize: SIMD2(Float(tex.imageWidth), Float(tex.imageHeight)),
-                             clamp: tex.flags.contains(.clampUVs))
+                             clamp: tex.flags.contains(.clampUVs), formatCode: formatCode)
     }
 
     /// Decode PNG/JPEG to straight-alpha RGBA8.

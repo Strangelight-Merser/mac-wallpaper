@@ -299,6 +299,13 @@ AVPlayerLayer   WKWebView + WE JS 桥     │
 2. shader 编译改为进程内调用 glslang/SPIRV-Cross，并加磁盘缓存（去掉对 Homebrew 的依赖，二次启动接近瞬时）。
 3. 回归测试集：现有样本 + 特效预览 + 自己生成的视频；把逐像素回归脚本化。
 
+**阶段一第 1 项进展（2026-10-22）**
+- ✅ `TEX<n>FORMAT` 填为绑定贴图的实际格式（材质里显式写了的仍以材质为准）；已确认能传进 shader，例如 cloudmotion 的 R8 遮罩编译出 `TEX1FORMAT=9`。现有场景和预览的输出都没有变化，这是对的：会受格式影响的 shader 是粒子（genericparticle、ropeparticle）、fur4（模型）和 lightshafts（其预览里绑的都是 RGBA 贴图）。粒子做起来以后这一项才真正生效。
+- ✅ sRGB：结论是**不需要改渲染**。WE 自己的 `combine_hdr.frag` 只在最终输出时用 `lin()` 转线性，说明场景缓冲始终在 gamma（sRGB 编码）空间里，贴图按存储值直接采样，这与我们的管线一致（也与报告说的"不要做二次 gamma"一致）。`IsSRGB` 只解析、不改变采样。
+- ✅ pass `conditions` 和 bind 的 `conditions`：按"shader 默认 combo ← 特效实例上的 combo ← pass 自己的 combo"求值，不满足的 pass 去掉、不满足的 bind 不绑；fbo 的 `clear` 初始颜色和 fbo `conditions` 也已支持。fluidsimulation 在 `LIGHTING=0` 时会正确跳过法线 pass（输出不变，GPU 少做一个 pass）。
+- `compose: true`（refraction）：它的 pass 本身就指定了 `effectcomposebackground` 材质，按普通 pass 执行即可，此前已经能正确渲染，无需额外处理。
+- 验证：4 个主场景、44 个特效预览逐像素不变；在同一状态下与上一个 commit 做 A/B bench，CPU 差异在噪声范围内（约 0.03 ms）。
+
 **阶段二：内容覆盖**
 1. M1 视频壁纸（AVPlayer 播 mp4/mov；webm 走上面的方案），以及场景里的视频纹理（TEXB0004）。
 2. M1 网页壁纸（WKWebView + `wallpaperPropertyListener` / 音频监听桥接）。

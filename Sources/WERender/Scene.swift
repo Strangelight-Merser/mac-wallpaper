@@ -57,6 +57,12 @@ public struct SceneDescription {
         public var target: String?
         /// Slot → FBO name, or "previous" (the input at the start of the current target sequence).
         public var binds: [Int: String] = [:]
+        /// Combo requirements (`conditions`): the pass is skipped unless all match.
+        public var conditions: [[String: Int]] = []
+        /// Per-slot bind requirements; a bind whose conditions fail is not applied.
+        public var bindConditions: [Int: [[String: Int]]] = [:]
+        /// Combos set anywhere in the same effect instance (conditions are evaluated against them).
+        public var effectCombos: [String: Int] = [:]
         /// `{"command": "copy"}` pass: copy one FBO into another, no shader.
         public var copy: (source: String, target: String)?
         /// `{"command": "swap"}`: exchange two FBOs (ping-pong simulations); uses `copy` for the names.
@@ -101,6 +107,8 @@ public struct SceneDescription {
     /// An effect-local render target (`effect.json` → `fbos`).
     public struct EffectFBO {
         public let name: String
+        public let clearColor: SIMD4<Float>
+        public let conditions: [[String: Int]]
         public let scale: Float
         public let fit: Int?
         public let size: (width: Int, height: Int)?
@@ -118,6 +126,9 @@ public struct SceneDescription {
             }
             format = d["format"] as? String ?? "rgba_backbuffer"
             clamp = (d["uvs"] as? String) != "repeat"
+            let c = parseFloats(d["clear"]) ?? [0, 0, 0, 0]
+            clearColor = SIMD4(c[safe: 0] ?? 0, c[safe: 1] ?? 0, c[safe: 2] ?? 0, c[safe: 3] ?? 0)
+            conditions = SceneDescription.parseConditions(d["conditions"])
         }
 
         /// Pixel size for a layer of `layerSize`.
@@ -229,8 +240,13 @@ public struct SceneDescription {
                         }
                         let o = overrides.popFirst() ?? [:]
                         var binds: [Int: String] = [:]
+                        var bindConditions: [Int: [[String: Int]]] = [:]
                         for case let b as [String: Any] in p["bind"] as? [Any] ?? [] {
-                            if let n = b["name"] as? String, let i = (b["index"] as? NSNumber)?.intValue { binds[i] = n }
+                            if let n = b["name"] as? String, let i = (b["index"] as? NSNumber)?.intValue {
+                                binds[i] = n
+                                let c = Self.parseConditions(b["conditions"])
+                                if !c.isEmpty { bindConditions[i] = c }
+                            }
                         }
                         for mpass in (try locator.json(mp))["passes"] as? [[String: Any]] ?? [] {
                             var pass = Pass(material: mpass, label: ename)
@@ -238,9 +254,15 @@ public struct SceneDescription {
                             pass.effect = effectIndex
                             pass.target = p["target"] as? String
                             pass.binds = binds
+                            pass.bindConditions = bindConditions
+                            pass.conditions = Self.parseConditions(p["conditions"])
                             effectPasses.append(pass)
                         }
                     }
+                    let effectCombos = effectPasses.reduce(into: [String: Int]()) { acc, p in
+                        for (k, v) in p.combos { acc[k.uppercased()] = v }
+                    }
+                    for i in effectPasses.indices { effectPasses[i].effectCombos = effectCombos }
                     passes += effectPasses
                     effectNames.append(ename)
                     effectFBOs.append((def["fbos"] as? [[String: Any]] ?? []).map(EffectFBO.init))
@@ -275,6 +297,22 @@ public struct SceneDescription {
         }
         self.layers = layers
         self.notes = notes
+    }
+}
+
+extension SceneDescription {
+    /// `"conditions": [{"LIGHTING": 1}, ...]` → combo requirements (all must hold).
+    static func parseConditions(_ v: Any?) -> [[String: Int]] {
+        (v as? [Any] ?? []).compactMap { c in
+            (c as? [String: Any])?.reduce(into: [String: Int]()) { acc, kv in
+                if let n = (kv.value as? NSNumber)?.intValue { acc[kv.key.uppercased()] = n }
+            }
+        }
+    }
+
+    /// Whether every condition matches `combos` (missing combos count as 0).
+    public static func conditionsHold(_ conditions: [[String: Int]], combos: [String: Int]) -> Bool {
+        conditions.allSatisfy { c in c.allSatisfy { (combos[$0.key] ?? 0) == $0.value } }
     }
 }
 
