@@ -7,6 +7,8 @@ public struct UniformAnnotation {
     public let name: String
     /// Material key used by `constantshadervalues` (e.g. "Bright").
     public let material: String?
+    /// UI label (e.g. "ui_editor_properties_tint_high"); legacy scenes key constants by the old label.
+    public let label: String?
     public let defaultValue: Any?
     public let combo: String?
 }
@@ -106,7 +108,7 @@ public enum ShaderPreprocessor {
             if let m = firstMatch(#"^\s*uniform\s+(\w+)\s+(\w+)\s*(\[[^\]]*\])?\s*;\s*//\s*(\{.*\})\s*$"#, l),
                let j = jsonObject(m[4]) {
                 uniforms.append(UniformAnnotation(type: m[1], name: m[2], material: j["material"] as? String,
-                                                  defaultValue: j["default"], combo: j["combo"] as? String))
+                                                  label: j["label"] as? String, defaultValue: j["default"], combo: j["combo"] as? String))
                 if m[1].hasPrefix("sampler2D"), (j["formatcombo"] as? Bool) == true,
                    m[2].hasPrefix("g_Texture"), let n = Int(m[2].dropFirst("g_Texture".count)) {
                     combos["TEX\(n)FORMAT"] = combos["TEX\(n)FORMAT"] ?? 0

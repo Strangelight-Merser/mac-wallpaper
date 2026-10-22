@@ -78,10 +78,12 @@ let package = Package(
         ),
         .target(name: "WEShader", dependencies: ["WEFormat", "CShaderTools"]),
         .target(name: "WEVideo"),
+        // System audio capture (ScreenCaptureKit) and WE's audio spectrum analysis.
+        .target(name: "WEAudio"),
         .target(name: "WEWeb", dependencies: ["WERender"]),
-        .target(name: "WERender", dependencies: ["WEFormat", "WEShader", "WEVideo"]),
-        .executableTarget(name: "wecli", dependencies: ["WEFormat", "WERender", "WEShader", "WEWeb"]),
-        .executableTarget(name: "WallpaperApp", dependencies: ["WERender", "WEWeb"]),
+        .target(name: "WERender", dependencies: ["WEFormat", "WEShader", "WEVideo", "WEAudio"]),
+        .executableTarget(name: "wecli", dependencies: ["WEFormat", "WERender", "WEShader", "WEWeb", "WEAudio"]),
+        .executableTarget(name: "WallpaperApp", dependencies: ["WERender", "WEWeb", "WEAudio"]),
         // Compiles .metal files through MTLDevice.makeLibrary (used by scripts/shader_batch.py).
         .executableTarget(name: "metalcheck", path: "tools", sources: ["metalcheck.swift"]),
     ],

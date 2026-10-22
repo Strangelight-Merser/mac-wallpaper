@@ -1,11 +1,15 @@
 <!doctype html>
 <html><head><meta charset="utf-8"><title>bridge test</title>
 <style>
-  body { margin: 0; font: 22px/1.3 Menlo, monospace; background: #222; color: #eee; }
-  #bar { height: 60px; }
+  body { margin: 0; font: 18px/1.3 Menlo, monospace; background: #222; color: #eee; }
+  #bar { height: 48px; }
   .row { padding: 4px 24px; }
   .ok { color: #6f6; } .bad { color: #f66; }
-  #mask { width: 120px; height: 120px; background: #4af; -webkit-mask-image: url(mask.svg); mask-image: url(mask.svg); margin: 12px 24px; }
+  #hover { position: absolute; right: 24px; top: 72px; width: 120px; height: 90px; background: #555; }
+  #hover.over { background: #fa4; }
+  #spectrum { position: absolute; left: 24px; bottom: 8px; display: flex; align-items: flex-end; height: 60px; gap: 1px; }
+  #spectrum div { width: 3px; background: #4af; }
+  #mask { position: absolute; right: 24px; bottom: 16px; width: 120px; height: 120px; background: #4af; -webkit-mask-image: url(mask.svg); mask-image: url(mask.svg); }
 </style></head>
 <body>
 <div id="bar"></div>
@@ -14,11 +18,31 @@
 <div class="row" id="audio">audio: ?</div>
 <div class="row" id="fetch">fetch: waiting</div>
 <div class="row" id="caption"></div>
+<div class="row" id="pointer">pointer: none</div>
+<div id="hover"></div>
+<div id="spectrum"></div>
 <div id="mask"></div>
 <script>
   const row = (id, ok, text) => { const e = document.getElementById(id); e.textContent = id + ': ' + text; e.className = 'row ' + (ok ? 'ok' : 'bad'); };
   row('audio', typeof window.wallpaperRegisterAudioListener === 'function', typeof window.wallpaperRegisterAudioListener);
-  window.wallpaperRegisterAudioListener(() => {});
+  // Audio: 128 bars (left 0-63, right 64-127).
+  const bars = Array.from({ length: 128 }, () => document.getElementById('spectrum').appendChild(document.createElement('div')));
+  window.wallpaperRegisterAudioListener((a) => {
+    a.forEach((v, i) => { bars[i].style.height = Math.round(Math.min(1, v) * 80) + 'px'; });
+    const peak = a.indexOf(Math.max(...a));
+    row('audio', a.length === 128, 'listener: ' + a.length + ' values, peak band ' + peak);
+  });
+  // Pointer: forwarded mouse events (clicks are trusted, moves synthesized).
+  const seen = [];
+  const box = document.getElementById('hover');
+  box.addEventListener('mouseover', () => box.classList.add('over'));
+  box.addEventListener('mouseout', () => box.classList.remove('over'));
+  for (const type of ['mousemove', 'mousedown', 'mouseup', 'click']) {
+    document.addEventListener(type, (e) => {
+      if (seen[seen.length - 1] !== type) seen.push(type);
+      row('pointer', true, `${seen.join(' ')} at ${e.clientX},${e.clientY}${e.isTrusted ? ' (trusted)' : ''}`);
+    });
+  }
   fetch('data.json').then(r => r.json()).then(j => row('fetch', true, j.message)).catch(e => row('fetch', false, String(e)));
   // Assign the listener late: properties must still arrive.
   setTimeout(() => {

@@ -1,0 +1,38 @@
+{
+	"general" : {
+		"clearcolor" : "0.1 0.1 0.1",
+		"orthogonalprojection" : { "width" : 768, "height" : 256 }
+	},
+	"objects" : [
+		{
+			"id" : 1, "name" : "pulse", "image" : "models/clouds.json",
+			"origin" : "128 128 0", "size" : "256 256", "visible" : true,
+			"effects" : [ {
+				"file" : "effects/pulse/effect.json", "visible" : true,
+				"passes" : [ {
+					"combos" : { "AUDIOPROCESSING" : 1, "PULSECOLOR" : 1, "PULSEALPHA" : 0 },
+					"constantshadervalues" : { "Tint low" : "0 0 0", "Tint high" : "1 0.5 0.1", "Noise amount" : 0, "audiobounds" : "0 0.6", "frequencymax" : 15 }
+				} ]
+			} ]
+		},
+		{
+			"id" : 2, "name" : "pulse right", "image" : "models/clouds.json",
+			"origin" : "384 128 0", "size" : "256 256", "visible" : true,
+			"effects" : [ {
+				"file" : "effects/pulse/effect.json", "visible" : true,
+				"passes" : [ {
+					"combos" : { "AUDIOPROCESSING" : 2, "PULSECOLOR" : 1, "PULSEALPHA" : 0 },
+					"constantshadervalues" : { "Tint low" : "0 0 0", "Tint high" : "0.1 0.5 1", "Noise amount" : 0, "audiobounds" : "0 0.6", "frequencymin" : 4, "frequencymax" : 15 }
+				} ]
+			} ]
+		},
+		{
+			"id" : 3, "name" : "xray", "image" : "models/clouds.json",
+			"origin" : "640 128 0", "size" : "256 256", "visible" : true,
+			"effects" : [ {
+				"file" : "effects/xray/effect.json", "visible" : true,
+				"passes" : [ { "constantshadervalues" : { "size" : 0.5 } } ]
+			} ]
+		}
+	]
+}

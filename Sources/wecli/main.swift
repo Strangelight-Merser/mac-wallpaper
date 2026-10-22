@@ -8,6 +8,7 @@ import UniformTypeIdentifiers
 import WEFormat
 import WERender
 import WEShader
+import WEAudio
 
 func usage() -> Never {
     print("""
@@ -21,6 +22,11 @@ func usage() -> Never {
       wecli bench   <wallpaper dir> --assets <dir> [--size WxH] [--frames N] [--cache off] [--layers a,b] [--bloom off] [--fps N]
       wecli render  <wallpaper dir> --assets <WE assets dir> [--time t] [--size WxH] [--prop name=value]...
                     [--layers a,b] [--bloom off] [--cache off] [--warm t] [--target _rt_name] --out <out.png>
+                    [--pointer x,y[:x2,y2]] [--press s] [--frames N] [--audio hz,hz[:hz,hz]]
+                    pointer: 0…1, y down; with --frames, N frames at 30 fps ending at --time, the pointer
+                    moving from x,y to x2,y2 (for simulations such as cursor ripples)
+                    audio: spectrum of sine tones (left[:right], amplitude 0.25 each) for g_AudioSpectrum*
+                    and web audio listeners
     """)
     exit(2)
 }
@@ -93,6 +99,7 @@ func describe(_ tex: Tex) -> String {
 /// snapshot comes out at exactly width×height pixels; the run loop spins until the capture is done.
 @MainActor
 func renderWithWebKit(_ request: WebContentRequest, width: Int, height: Int, time: Double,
+                      pointer: SIMD2<Float>? = nil, press: Bool = false, audio: AudioSpectrum? = nil,
                       settle: Double = Double(ProcessInfo.processInfo.environment["WE_WEB_SETTLE"] ?? "") ?? 0.5) throws -> (CGImage, [String]) {
     let app = NSApplication.shared
     app.setActivationPolicy(.prohibited)
@@ -103,6 +110,30 @@ func renderWithWebKit(_ request: WebContentRequest, width: Int, height: Int, tim
     window.contentView = web.webView
     window.orderFrontRegardless()
     var result: Result<CGImage, Error>?
+    // --pointer x,y [--press 1]: move the mouse there (and click) once the page has loaded.
+    if let pointer {
+        var done = false
+        Task { @MainActor in
+            try? await web.waitUntilLoaded()
+            try? await Task.sleep(nanoseconds: UInt64(settle * 1e9))
+            let size = window.contentLayoutRect.size
+            let p = CGPoint(x: CGFloat(pointer.x) * size.width, y: CGFloat(pointer.y) * size.height)
+            web.sendMouseMove(to: p)
+            if press { web.sendMouse(.leftMouseDown, at: p); web.sendMouse(.leftMouseUp, at: p) }
+            done = true
+        }
+        while !done { RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.02)) }
+    }
+    if let audio {
+        var done = false
+        Task { @MainActor in
+            try? await web.waitUntilLoaded()
+            try? await Task.sleep(nanoseconds: UInt64(settle * 1e9))
+            web.sendAudio(audio.web128)
+            done = true
+        }
+        while !done { RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.02)) }
+    }
     // Debug: WE_WEB_EVAL="<js expression>" is evaluated in the page just before the capture.
     if let js = ProcessInfo.processInfo.environment["WE_WEB_EVAL"] {
         var done = false
@@ -228,6 +259,21 @@ case "render":
     guard size.count == 2 else { usage() }
     let time = Float(opts["--time"] ?? "0") ?? 0
     var start = Date()
+    let path = (opts["--pointer"] ?? "").split(separator: ":").map {
+        $0.split(separator: ",").compactMap { Float($0) }
+    }.filter { $0.count == 2 }.map { SIMD2<Float>($0[0], $0[1]) }
+    // --audio 110,2000[:880]: tones (Hz) per channel → analysed like captured audio.
+    let audio: AudioSpectrum? = opts["--audio"].map { spec in
+        let channels = spec.split(separator: ":").map { $0.split(separator: ",").compactMap { Double($0) } }
+        func signal(_ tones: [Double]) -> [Float] {
+            (0..<SpectrumAnalyzer.fftSize).map { i in
+                Float(tones.reduce(0) { $0 + 0.25 * sin(2 * .pi * $1 * Double(i) / 48000) })
+            }
+        }
+        let analyzer = SpectrumAnalyzer()
+        analyzer.append(left: signal(channels.first ?? []), right: signal(channels.last ?? []))
+        return analyzer.settle()
+    }
     let img: CGImage
     let summary: String
     let warnings: [String]
@@ -239,17 +285,34 @@ case "render":
             scene.debugTarget = opts["--target"]
             scene.onlyLayers = opts["--layers"].map { Set($0.split(separator: ",").map(String.init)) }
             scene.disableLayerCache = opts["--cache"] == "off"
+            if let audio { scene.audio = audio }
         }
         // --warm t: render a frame at time t first, so the measured frame uses the layer caches.
         if let warm = opts["--warm"].flatMap(Float.init) { _ = try renderer.render(width: size[0], height: size[1], time: warm) }
         start = Date()
+        let frames = max(1, Int(opts["--frames"] ?? "1") ?? 1)
+        if let scene = renderer as? SceneRenderer, let from = path.first {
+            let to = path.last!
+            scene.pointer.state.z = Float(opts["--press"] ?? "0") ?? 0
+            scene.pointer.state.x = scene.pointer.state.z > 0 ? 1 : 0
+            for f in 0..<frames - 1 {
+                scene.pointer.position = from + (to - from) * Float(f) / Float(frames - 1)
+                _ = try renderer.render(width: size[0], height: size[1], time: time - Float(frames - 1 - f) / 30)
+            }
+            scene.pointer.position = to
+        } else {
+            for f in 0..<frames - 1 {
+                _ = try renderer.render(width: size[0], height: size[1], time: time - Float(frames - 1 - f) / 30)
+            }
+        }
         img = try renderer.render(width: size[0], height: size[1], time: time)
         summary = renderer.summary
         warnings = renderer.warnings
     } catch WallpaperError.needsWebKit(let request) {
         start = Date()
         (img, warnings) = try MainActor.assumeIsolated {
-            try renderWithWebKit(request, width: size[0], height: size[1], time: Double(time))
+            try renderWithWebKit(request, width: size[0], height: size[1], time: Double(time),
+                                 pointer: path.last, press: (Float(opts["--press"] ?? "0") ?? 0) > 0, audio: audio)
         }
         if case .video = request { summary = "web video (WebKit)" } else { summary = "web page (WebKit)" }
     }

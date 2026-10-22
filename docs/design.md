@@ -309,8 +309,8 @@ AVPlayerLayer   WKWebView + WE JS 桥     │
 **阶段二：内容覆盖**
 1. ✅ M1 视频壁纸（§6.15、§6.16；mp4/mov/webm-VP9/AV1）。场景里的视频纹理（TEXB0004）和 VP8 留到后面。
 2. ✅ M1 网页壁纸 + VP8 的 WebKit 兜底（§6.17）。
-3. 鼠标交互：相机视差、`g_Pointer*`、光标类特效。
-4. M5 粒子系统，以及文字图层、音频频谱（ScreenCaptureKit，需要用户授权）。
+3. ✅ 鼠标交互：相机视差、`g_Pointer*`、光标类特效、网页鼠标事件；✅ 音频频谱（ScreenCaptureKit，需要用户授权）（§6.18）。
+4. M5 粒子系统，以及文字图层。
 5. M6 SceneScript（JavaScriptCore，按官方 SceneScript 文档实现）。
 6. M7 3D 模型 / puppet。
 
@@ -413,6 +413,35 @@ AVPlayerLayer   WKWebView + WE JS 桥     │
 **回归**：新增 7 个用例——自写的桥接测试页（`regression/fixtures/webtest`，可以提交：覆盖属性类型、晚注册监听、fps、音频注册函数、同源 fetch、CSS mask）的默认/覆盖两种、corsair_o_tron 默认/覆盖两种、VP8 的 3 个用例。离屏状态下 CSS 动画和 rAF 不会推进，所以截图是确定的（连续三次逐像素一致）。全套 123/123，连续跑两次都通过。
 
 **后续**：音频频谱采集（ScreenCaptureKit）→ 喂给 `wallpaperRegisterAudioListener` 和场景里的 `g_AudioSpectrum*`；鼠标事件转发给网页壁纸；`userDirectoryFiles*` 等不常用接口。
+
+## 6.18 鼠标交互 + 音频频谱（2026-10-22，阶段二第 3 项）
+
+**指针约定（用两个版本的 xray shader 实测确定）**
+- `g_PointerPosition` / `g_PointerPositionLast`：光标在可见画面里的位置，0…1，**y 向下（顶部为 0）**，即屏幕坐标。shader 会先 `pointer.y = 1 - pointer.y` 再 `*2-1` 变成 y 向上的裁剪空间坐标。LWE 用的是 y 向上，但那是因为它在 OpenGL 里另有翻转；预览目录里旧版 xray 直接乘 `g_ModelViewProjectionMatrixInverse`，只有 y 向下的约定才能让光晕出现在光标处。
+- `g_EffectTextureProjectionMatrix(+Inverse)` = 图层 MVP · scale(半宽, 半高)，即把图层四边形（-1…1，y 向上）映射到裁剪空间；光标类特效用它的逆矩阵求光标在图层里的 UV。LWE 传单位矩阵，只在图层铺满全屏时才对。实测新版 xray 的光晕中心与指定的光标位置误差 < 0.01。
+- `g_PointerState` = (左键, 右键, 按下强度, 0)；cursorripple / fluidsimulation 只用 `.z`。
+- `g_ParallaxPosition`：光标位置的平滑版本（depthparallax 用）。
+- 相机视差（`general.cameraparallax*` + 图层 `parallaxDepth`）：位移 = 平滑后的 (光标 - 0.5)·amount·mouseinfluence，每个图层平移 (parallaxDepth + amount)·位移·场景宽度（与 LWE 相同）。平滑方面，LWE 的 `mix(d, 目标, clamp(delay·dt))` 在常见的 delay=0.1 下每帧只移动 0.3%，几乎不动，所以这里把 `delay` 当作秒级时间常数：k = 1 − e^(−dt/delay)。待有 Windows 对照时再校准。
+- 这些值都做成了 PassPlan 的每帧 patch，并计入 `isDynamic`（读它们的 pass 不会被静态缓存）。
+
+**App 里的光标跟踪**：壁纸窗口 `ignoresMouseEvents`（点击要落到 Finder 桌面上），所以：
+- 场景：每帧轮询 `NSEvent.mouseLocation` 和 `pressedMouseButtons`，不需要任何权限。只有当光标下最上层的窗口是"桌面级"窗口（`NSWindow.windowNumber(at:)` 命中测试 + `CGWindowListCopyWindowInfo` 取 layer < 0，即我们的壁纸窗口或 Finder 的桌面图标窗口）时才算数；在 App 窗口、Dock、菜单栏上时，位置保持不动、按键视为松开。结果按位置缓存 0.25 秒。每块屏幕各有一份指针状态（含上一帧位置和视差平滑），绘制前换进共享的 renderer。
+- 网页：用全局事件监听（鼠标事件不需要辅助功能权限）。点击转成真正的 NSEvent 交给 WKWebView（`mouseDown`/`mouseUp`），页面收到的是可信的 `mousedown`/`mouseup`/`click`。**WebKit 会丢掉非 key 窗口的 mouseMoved 事件**（桌面窗口永远不是 key 窗口），所以移动改为在页面里合成 `pointermove`/`mousemove`（元素变化时再发 over/out），合并到每 1/60 秒最多一次；这些事件 `isTrusted=false`，CSS `:hover` 不生效。只转发起始于桌面上的按下，以及与之配对的松开。
+- 菜单里新增"Mouse Interaction"开关（默认开）。
+
+**音频频谱**
+- 采集：`WEAudio.SystemAudioCapture`，ScreenCaptureKit 的 `SCStream`，`capturesAudio`、排除本进程、48 kHz 立体声；同时要求一个 2×2、1 fps 的视频轨并直接丢弃（ScreenCaptureKit 总是要抓一块屏幕，不加 screen 输出会一直打日志）。需要**屏幕录制权限**（系统设置里显示为"屏幕与系统录音"），所以是菜单里可选开启的"Audio Visualization"，默认关；第一次开启时弹系统授权框，被拒时给出说明并可一键打开系统设置。只有在开启、未暂停、至少一块屏幕可见、且壁纸确实用到音频时才采集：场景要有读取 `g_AudioSpectrum*` 的 pass（第一帧预热后就知道），网页要注册了 `wallpaperRegisterAudioListener`（桥接脚本注册时会通知 App）。
+- 分析：`WEAudio.SpectrumAnalyzer`，沿用 LWE 的刻度，这样数值范围和壁纸作者调参时一致：取最近 1024 个样本做 FFT（vDSP），第 b 个频段取 bin 2b+1…2b+2 中较响的一个（48 kHz 下每段约 47 Hz，64 段覆盖约 0–6 kHz），值 = 0.35·log10(功率)·(2 − e^((1 − b/(n−1)) − 0.5))，限制在 0…1；数值每 1/30 秒最多向目标移动 0.3。与 LWE 的不同之处：立体声（LWE 是单声道 8 位）、加 Hann 窗（功率按 LWE 无窗时的单音幅度换算，所以单音的读数相同）、用到全部 bin（LWE 跳着取）、32/16 段用各自的 bin（LWE 是后写覆盖）、不会出现负值、0.25 秒收不到音频就回落到静音（没有声音时 ScreenCaptureKit 可能不再送数据）。注意 LWE 的倾斜系数使最低频段最多只有约 0.66，pulse 默认的 audiobounds 0.5–1 只会被重低音轻微触发——与 WE 本体是否一致还需要 Windows 对照。
+- 场景：`g_AudioSpectrum{16,32,64}{Left,Right}` 是 `float[n]` 数组，按数组步长写入每帧 patch。网页：`window.__we.audio(128 个值)` 以 30 Hz 推给所有监听者（左 0–63、右 64–127）；停止采集时推一次全零。
+
+**顺带修复**
+- 官方特效的 material/shader 放在 `assets/effects/<名>/` 下，WE 把每个这样的目录当作额外的资源根。`AssetLocator` 现在在找不到 `materials/effects/…`、`shaders/effects/…` 时会去对应的特效目录里找（"cursorripple_apply_force" → cursorripple）。现有样例都自带特效文件，所以只影响直接引用官方特效的场景（比如下面的测试场景）。
+- 旧场景的 `constantshadervalues` 用的是 uniform 以前的英文标签（"Tint high"、"Pulse speed"），而现在的官方 shader 只认 material 名（`tinthigh`、`speed`）。这些旧标签保留在今天的本地化键里（`ui_editor_properties_tint_high`），所以在 material 名对不上时，忽略大小写、空格和下划线去匹配 material 名或标签。样例里有 124 处这种写法，都在特效预览里，但预览自带的旧 shader 本来就用旧标签当 material 名，所以输出不变。
+
+**离线测试（wecli）**：`--pointer x,y[:x2,y2]`（y 向下）、`--press s`、`--frames N`（以 30 fps 渲染 N 帧，光标从第一个点移到第二个点，用来驱动 cursorripple 这类模拟）、`--audio 60,120:300`（左:右 的正弦音，各 0.25 幅度，经同一个分析器得到频谱）。网页同样支持：光标移动 + 点击、推一帧音频。
+- 新增 8 个回归用例：xray / depthparallax 的光标位置、cursorripple / fluidsimulation 的拖动、网页 fixture 的鼠标 + 音频，以及自写的测试场景 `regression/fixtures/audiotest`（只引用官方资源：左声道 pulse 有声时变橙、右声道 pulse 变蓝、新版 xray 跟随光标；静音时两个 pulse 是黑的）。全套 131/131，连续两次都通过（模拟类用例是确定的）。
+
+**实测**：3 个图层的 audiotest 场景在 App 里 3.7% CPU（音频关闭时）；网页 fixture 空闲时 0%。光标在别的 App 窗口上时被正确忽略。**未能实测**：桌面上真实的光标移动（没有替用户移动鼠标）、ScreenCaptureKit 的实时采集（本机这个进程环境没有屏幕录制权限，需要用户在系统设置里授权后再试）。另外 App 是临时（ad-hoc）签名，每次重新构建代码签名都会变，macOS 可能会要求重新授权——要等阶段三用固定的签名身份才能解决。
 
 ## 7. 待确认
 1. 最低系统版本：建议 macOS 14（SMAppService、ScreenCaptureKit 音频成熟）。

@@ -17,7 +17,22 @@ public struct AssetLocator {
             let u = r.appendingPathComponent(relative)
             if FileManager.default.fileExists(atPath: u.path) { return u }
         }
+        // Stock effects keep their materials and shaders in assets/effects/<name>/, which WE treats as
+        // one more asset root: "shaders/effects/cursorripple_apply_force.vert" → effects/cursorripple/….
+        guard roots.count > 1, let assets = roots.last else { return nil }
+        for name in Self.effectNames(for: relative) {
+            let u = assets.appendingPathComponent("effects/\(name)/\(relative)")
+            if FileManager.default.fileExists(atPath: u.path) { return u }
+        }
         return nil
+    }
+
+    /// Effect folder names a materials/shaders path may belong to, longest first ("a_b_c" → a_b_c, a_b, a).
+    static func effectNames(for relative: String) -> [String] {
+        guard relative.hasPrefix("materials/effects/") || relative.hasPrefix("shaders/effects/") else { return [] }
+        let file = relative.split(separator: "/")[2]
+        let parts = file.split(separator: ".")[0].split(separator: "_")
+        return (1...max(1, parts.count)).reversed().map { parts.prefix($0).joined(separator: "_") }
     }
 
     public func data(_ relative: String) throws -> Data {

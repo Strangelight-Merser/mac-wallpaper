@@ -2,6 +2,7 @@ import CoreGraphics
 import Foundation
 import Metal
 import simd
+import WEAudio
 import WEFormat
 import WEShader
 
@@ -35,6 +36,29 @@ public final class SceneRenderer: WallpaperRenderer {
         var pipelines: [String: MTLRenderPipelineState] = [:]
     }
 
+    /// Cursor state for one output (the app keeps one per screen and swaps it in before each frame).
+    public struct PointerInput {
+        /// Cursor in the visible frame, 0…1, y = 0 at the top (WE's `g_PointerPosition`: shaders flip
+        /// it to y-up clip space, e.g. `mul(vec4(p * 2 - 1, 0, 1), g_ModelViewProjectionMatrixInverse)`).
+        public var position = SIMD2<Float>(0.5, 0.5)
+        /// (left button, right button, press strength, 0) → `g_PointerState`.
+        public var state = SIMD4<Float>(0, 0, 0, 0)
+        /// Position at the previous frame (set by the renderer after each frame).
+        public internal(set) var last: SIMD2<Float>?
+        /// Smoothed camera-parallax displacement and the cursor-following `g_ParallaxPosition`.
+        public internal(set) var parallax = SIMD2<Float>(0, 0)
+        public internal(set) var parallaxPosition = SIMD2<Float>(0.5, 0.5)
+        var lastTime: Float?
+        public init() {}
+    }
+
+    public var pointer = PointerInput()
+    /// Audio spectrum for `g_AudioSpectrum{16,32,64}{Left,Right}` (silence by default).
+    public var audio = AudioSpectrum()
+    /// Whether any pass built so far reads the audio spectrum (known after the first frame), so the
+    /// app only captures audio when it is used.
+    public var usesAudio: Bool { plans.values.contains { $0.usesAudio } }
+
     /// Per-draw state needed to fill uniforms.
     struct DrawContext {
         let layer: SceneDescription.ImageLayer?
@@ -42,6 +66,12 @@ public final class SceneRenderer: WallpaperRenderer {
         let mvp: simd_float4x4
         let model: simd_float4x4
         let textures: [Int: LoadedTexture]
+    }
+
+    /// `g_EffectTextureProjectionMatrix`: maps the layer's quad (-1…1, y up) to clip space; cursor
+    /// effects invert it to find the pointer's UV within the layer. (LWE passes identity.)
+    static func effectTextureProjection(_ layerMVP: simd_float4x4, half: SIMD2<Float>) -> simd_float4x4 {
+        layerMVP * scaling([half.x, half.y, 1])
     }
 
     var programs: [String: Program] = [:]
@@ -116,6 +146,8 @@ public final class SceneRenderer: WallpaperRenderer {
     /// tracking orders reuse across in-flight frames on the same queue.
     public func encodeFrame(into output: MTLTexture, commandBuffer: MTLCommandBuffer, time: Float) {
         self.time = time
+        updateParallax()
+        defer { pointer.last = pointer.position; pointer.lastTime = time }
         outputSize = SIMD2(Float(output.width), Float(output.height))
         sceneTarget = pooledTarget("scene", output.width, output.height)
         renderTargets = [:]
@@ -137,6 +169,18 @@ public final class SceneRenderer: WallpaperRenderer {
         lastFrameEncoders = frameEncoders
         frameEncoders = 0
         self.commandBuffer = nil
+    }
+
+    /// Camera parallax follows the cursor with a lag. LWE uses `mix(d, target, clamp(delay·dt))`, which
+    /// with the usual delay of 0.1 barely moves (0.3% per frame); here `delay` is treated as a time
+    /// constant in seconds instead. TODO: compare with WE on Windows.
+    func updateParallax() {
+        let dt = pointer.lastTime.map { max(0, min(0.25, time - $0)) } ?? 0
+        let p = scene.parallax
+        let k = dt == 0 ? (pointer.lastTime == nil ? 1 : 0) : 1 - exp(-dt / max(0.001, p.delay))
+        let centered = SIMD2(pointer.position.x - 0.5, 0.5 - pointer.position.y) // scene space is y-up
+        pointer.parallaxPosition += (pointer.position - pointer.parallaxPosition) * k
+        if p.enabled { pointer.parallax += (centered * p.amount * p.mouseInfluence - pointer.parallax) * k }
     }
 
     /// Copy the (possibly HDR) scene target into the output, clamping to [0, 1].
@@ -327,7 +371,14 @@ public final class SceneRenderer: WallpaperRenderer {
         // Hidden layers render into their composite FBO instead of the scene, for other layers to read.
         let toScene = layer.visible
         let fbo = (passes.count > 1 || !toScene) ? compositeTargets(index, w, h) : []
-        let model = translation(layer.origin) * rotationZ(layer.angles.z) * scaling(layer.scale)
+        var origin = layer.origin
+        if scene.parallax.enabled {
+            let d = (layer.parallaxDepth + scene.parallax.amount) * pointer.parallax * scene.canvas.x
+            origin += SIMD3(d.x, d.y, 0)
+        }
+        let model = translation(origin) * rotationZ(layer.angles.z) * scaling(layer.scale)
+        effectProjection = Self.effectTextureProjection(projection * model, half: size / 2)
+        defer { effectProjection = matrix_identity_float4x4 }
         let plans = try passes.enumerated().map { i, pass -> PassPlan? in
             pass.copy != nil ? nil : try self.plan("L\(index).\(i)", pass: pass, layer: layer, model: model, hasPrevious: i > 0)
         }
@@ -469,11 +520,15 @@ public final class SceneRenderer: WallpaperRenderer {
     /// pipelines, texture bindings and a uniform buffer template with only per-frame values patched.
     final class PassPlan {
         enum Input { case fixed(LoadedTexture), named(String), previous, bindPrevious }
-        enum Patch { case mvp, mvpInverse, time, resolution(Int), texelSize, texelSizeHalf, screen }
+        enum Patch {
+            case mvp, mvpInverse, time, resolution(Int), texelSize, texelSizeHalf, screen
+            case pointer, pointerLast, pointerState, parallaxPosition, effectProjection, effectProjectionInverse
+            case audio(bands: Int, right: Bool)
+        }
         struct UniformPlan {
             let bufferIndex: Int
             var template: [UInt8]
-            var patches: [(patch: Patch, offset: Int, type: String)]
+            var patches: [(patch: Patch, offset: Int, type: String, stride: Int)]
         }
 
         let label: String
@@ -490,6 +545,7 @@ public final class SceneRenderer: WallpaperRenderer {
         /// Output can change from frame to frame (time, pointer, audio, screen size or scene reads).
         /// Static passes are candidates for layer caching.
         var isDynamic = false
+        var usesAudio = false
 
         init(label: String, program: Program, programKey: String, blend: String, inputs: [Int: Input],
              bindings: [(isVertex: Bool, slot: Int, texture: Int, sampler: Int)]) {
@@ -499,6 +555,8 @@ public final class SceneRenderer: WallpaperRenderer {
     }
 
     var plans: [String: PassPlan] = [:]
+    /// The current layer's `g_EffectTextureProjectionMatrix` (identity outside layers).
+    var effectProjection = matrix_identity_float4x4
 
     func plan(_ key: String, pass: SceneDescription.Pass, layer: SceneDescription.ImageLayer?, model: simd_float4x4,
               hasPrevious: Bool, fixedInputs: [String] = []) throws -> PassPlan {
@@ -554,7 +612,7 @@ public final class SceneRenderer: WallpaperRenderer {
         func uniformPlan(_ stage: CompiledStage) -> PassPlan.UniformPlan? {
             guard let index = stage.uniformBufferIndex else { return nil }
             var buf = [UInt8](repeating: 0, count: max(stage.uniformBlockSize, 16))
-            var patches: [(patch: PassPlan.Patch, offset: Int, type: String)] = []
+            var patches: [(patch: PassPlan.Patch, offset: Int, type: String, stride: Int)] = []
             for m in stage.uniforms {
                 let patch: PassPlan.Patch? = {
                     switch m.name {
@@ -564,13 +622,22 @@ public final class SceneRenderer: WallpaperRenderer {
                     case "g_TexelSize": return .texelSize
                     case "g_TexelSizeHalf": return .texelSizeHalf
                     case "g_Screen": return .screen
+                    case "g_PointerPosition": return .pointer
+                    case "g_PointerPositionLast": return .pointerLast
+                    case "g_PointerState": return .pointerState
+                    case "g_ParallaxPosition": return .parallaxPosition
+                    case "g_EffectTextureProjectionMatrix": return .effectProjection
+                    case "g_EffectTextureProjectionMatrixInverse": return .effectProjectionInverse
                     default:
+                        if m.name.hasPrefix("g_AudioSpectrum"), let bands = Int(m.name.dropFirst(15).prefix(2)) {
+                            return .audio(bands: bands, right: m.name.hasSuffix("Right"))
+                        }
                         if m.name.hasPrefix("g_Texture"), m.name.hasSuffix("Resolution"),
                            let i = Int(m.name.dropFirst(9).dropLast(10)) { return .resolution(i) }
                         return nil
                     }
                 }()
-                if let patch { patches.append((patch, m.offset, m.type)); continue }
+                if let patch { patches.append((patch, m.offset, m.type, m.arrayStride)); continue }
                 guard let v = value(for: m.name, program: program, ctx: ctx) else {
                     warn("\(pass.shader): no value for \(m.name)")
                     continue
@@ -589,9 +656,12 @@ public final class SceneRenderer: WallpaperRenderer {
         plan.vertexUniforms = uniformPlan(program.compiled.vertex)
         plan.fragmentUniforms = uniformPlan(program.compiled.fragment)
         let frameVarying: Set<String> = ["g_Time", "g_Daytime", "g_TexelSize", "g_TexelSizeHalf", "g_Screen",
-                                         "g_PointerPosition", "g_PointerPositionLast"]
+                                         "g_PointerPosition", "g_PointerPositionLast", "g_PointerState",
+                                         "g_ParallaxPosition", "g_EffectTextureProjectionMatrix",
+                                         "g_EffectTextureProjectionMatrixInverse"]
         let uniformNames = (program.compiled.vertex.uniforms + program.compiled.fragment.uniforms).map(\.name)
-        plan.isDynamic = uniformNames.contains { frameVarying.contains($0) || $0.hasPrefix("g_Audio") }
+        plan.usesAudio = uniformNames.contains { $0.hasPrefix("g_AudioSpectrum") }
+        plan.isDynamic = plan.usesAudio || uniformNames.contains { frameVarying.contains($0) }
             || sources.values.contains { if case .named = $0 { return true } else { return false } }
         plans[key] = plan
         return plan
@@ -647,6 +717,24 @@ public final class SceneRenderer: WallpaperRenderer {
                 case .texelSize: v = [1 / outputSize.x, 1 / outputSize.y]
                 case .texelSizeHalf: v = [0.5 / outputSize.x, 0.5 / outputSize.y]
                 case .screen: v = [outputSize.x, outputSize.y, outputSize.x / outputSize.y]
+                case .pointer: v = [pointer.position.x, pointer.position.y]
+                case .pointerLast: let l = pointer.last ?? pointer.position; v = [l.x, l.y]
+                case .pointerState: v = [pointer.state.x, pointer.state.y, pointer.state.z, pointer.state.w]
+                case .parallaxPosition: v = [pointer.parallaxPosition.x, pointer.parallaxPosition.y]
+                case .effectProjection: v = effectProjection.flat
+                case .effectProjectionInverse: v = effectProjection.inverse.flat
+                case .audio(let bands, let right):
+                    let a = switch (bands, right) {
+                        case (16, false): audio.left16
+                        case (16, true): audio.right16
+                        case (32, false): audio.left32
+                        case (32, true): audio.right32
+                        case (_, false): audio.left64
+                        case (_, true): audio.right64
+                    }
+                    // float[n] arrays: one value per element at the array stride.
+                    for (k, x) in a.enumerated() { write([x], type: p.type, at: p.offset + k * p.stride, into: &u.template) }
+                    continue
                 case .resolution(let i):
                     let t = inputs[i] ?? white
                     v = [t.textureSize.x, t.textureSize.y, t.imageSize.x, t.imageSize.y]
@@ -736,6 +824,9 @@ public final class SceneRenderer: WallpaperRenderer {
         if let key = annotation?.material, let v = parseFloats(scene.properties.resolve(ctx.pass.constants[key])) {
             return v
         }
+        if let annotation, let v = parseFloats(scene.properties.resolve(Self.legacyConstant(annotation, ctx.pass.constants))) {
+            return v
+        }
         if let l = ctx.layer {
             switch name {
             case "g_Brightness": return [l.brightness]
@@ -753,6 +844,16 @@ public final class SceneRenderer: WallpaperRenderer {
         case "g_Color", "g_Color4", "g_CompositeColor": return [1, 1, 1, 1]
         default: return nil
         }
+    }
+
+    /// Older scenes key `constantshadervalues` by the uniform's former English label ("Tint high",
+    /// "Pulse speed") instead of its material name; those labels survive in today's localization keys
+    /// (`ui_editor_properties_tint_high`), so compare both ignoring case, spaces and underscores.
+    static func legacyConstant(_ a: UniformAnnotation, _ constants: [String: Any]) -> Any? {
+        func norm(_ s: String) -> String { s.lowercased().filter { $0.isLetter || $0.isNumber } }
+        let names = Set([a.material, a.label.map { $0.replacingOccurrences(of: "ui_editor_properties_", with: "") }]
+            .compactMap { $0 }.map(norm))
+        return constants.first { names.contains(norm($0.key)) }?.value
     }
 
     func write(_ v: [Float], type: String, at offset: Int, into buf: inout [UInt8]) {

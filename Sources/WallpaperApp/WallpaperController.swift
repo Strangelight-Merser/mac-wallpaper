@@ -1,5 +1,6 @@
 import AppKit
 import MetalKit
+import WEAudio
 import WERender
 import WEWeb
 
@@ -25,6 +26,26 @@ final class WallpaperController: NSObject, MTKViewDelegate {
     var onStateChange: (() -> Void)?
     private(set) var loadError: String?
 
+    /// Cursor input for scenes (`g_Pointer*`, parallax) and web pages.
+    var mouseInput = true {
+        didSet { updateMouseMonitor() }
+    }
+    private let tracker = PointerTracker()
+    private var pointers: [CGDirectDisplayID: SceneRenderer.PointerInput] = [:]
+    private var mouseMonitor: Any?
+    /// Screen whose page got the last forwarded mouse-down (its mouse-up goes there too).
+    private var mouseDownScreen: CGDirectDisplayID?
+    private var pendingMove: (screen: CGDirectDisplayID, point: CGPoint, buttons: Int)?
+
+    /// Audio spectrum for audio-reactive wallpapers (opt-in: Screen Recording permission).
+    var audioEnabled = false {
+        didSet { updateAudio() }
+    }
+    let audio = AudioFeed()
+    private var audioTimer: Timer?
+    /// This frame's spectrum, shared by all screens.
+    private var frameAudio = AudioSpectrum()
+
     var fps: Int = 30 {
         didSet {
             webViews.values.forEach { $0.setFPS(effectiveFPS) }
@@ -45,6 +66,7 @@ final class WallpaperController: NSObject, MTKViewDelegate {
 
     override init() {
         super.init()
+        audio.onStateChange = { [weak self] in self?.audioStateChanged() }
         rebuildWindows()
         let nc = NotificationCenter.default
         nc.addObserver(self, selector: #selector(screensChanged), name: NSApplication.didChangeScreenParametersNotification, object: nil)
@@ -75,6 +97,9 @@ final class WallpaperController: NSObject, MTKViewDelegate {
                     self.detachWeb()
                     self.renderer = r
                     self.clock = 0
+                    self.pointers = [:]
+                    self.updateMouseMonitor()
+                    self.updateAudio()
                     for w in r.warnings { log("warning: \(w)") }
                     log(String(format: "ready in %.2fs (%@)", CACurrentMediaTime() - started, r.summary))
                     self.setPaused(.loading, false)
@@ -85,6 +110,8 @@ final class WallpaperController: NSObject, MTKViewDelegate {
                     self.renderer = nil
                     self.webRequest = request
                     self.windows.forEach(self.attachWeb)
+                    self.updateMouseMonitor()
+                    self.updateAudio()
                     log(String(format: "ready in %.2fs (%@)", CACurrentMediaTime() - started, "\(WallpaperError.needsWebKit(request))"))
                     self.setPaused(.loading, false)
                 }
@@ -104,6 +131,7 @@ final class WallpaperController: NSObject, MTKViewDelegate {
         guard let request = webRequest, webViews[window.screenID] == nil else { return }
         let web = WebWallpaper(request: request, fps: effectiveFPS)
         web.onWarning = { log("warning (web): \($0)") }
+        web.onAudioListener = { [weak self] in self?.updateAudio() }
         web.webView.frame = window.contentLayoutRect
         window.contentView = web.webView
         webViews[window.screenID] = web
@@ -115,6 +143,95 @@ final class WallpaperController: NSObject, MTKViewDelegate {
         webViews = [:]
         webPaused = [:]
         webRequest = nil
+    }
+
+    // MARK: - mouse (web pages)
+
+    /// Web pages get mouse events from a global monitor while the cursor is over the desktop.
+    func updateMouseMonitor() {
+        let want = mouseInput && { if case .page? = webRequest { return true } else { return false } }()
+        if want, mouseMonitor == nil {
+            mouseMonitor = NSEvent.addGlobalMonitorForEvents(
+                matching: [.mouseMoved, .leftMouseDragged, .rightMouseDragged, .leftMouseDown, .leftMouseUp,
+                           .rightMouseDown, .rightMouseUp]) { [weak self] event in
+                let type = event.type
+                MainActor.assumeIsolated { self?.forwardMouse(type) }
+            }
+        } else if !want, let m = mouseMonitor {
+            NSEvent.removeMonitor(m)
+            mouseMonitor = nil
+            mouseDownScreen = nil
+        }
+    }
+
+    func forwardMouse(_ type: NSEvent.EventType) {
+        let m = NSEvent.mouseLocation
+        let isUp = type == .leftMouseUp || type == .rightMouseUp
+        guard let window = windows.first(where: { $0.frame.contains(m) }) ?? (isUp ? windows.first { $0.screenID == mouseDownScreen } : nil),
+              let web = webViews[window.screenID], webPaused[window.screenID] == false else { return }
+        // Page coordinates: CSS pixels from the window's top-left.
+        let point = CGPoint(x: m.x - window.frame.minX, y: window.frame.maxY - m.y)
+        switch type {
+        case .leftMouseDown, .rightMouseDown:
+            guard tracker.isOverDesktop(m) else { return }
+            mouseDownScreen = window.screenID
+            web.sendMouse(type, at: point)
+        case .leftMouseUp, .rightMouseUp:
+            // Only the up that ends a forwarded down (the press may have started over an app window).
+            guard mouseDownScreen == window.screenID else { return }
+            mouseDownScreen = nil
+            web.sendMouse(type, at: point)
+        default:
+            guard tracker.isOverDesktop(m) else { return }
+            // Coalesce moves (the mouse reports at 120 Hz+) to one page update per 1/60 s.
+            let flush = pendingMove == nil
+            pendingMove = (window.screenID, point, NSEvent.pressedMouseButtons & 3)
+            if flush {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0 / 60) { [weak self] in
+                    MainActor.assumeIsolated {
+                        guard let self, let move = self.pendingMove else { return }
+                        self.pendingMove = nil
+                        self.webViews[move.screen]?.sendMouseMove(to: move.point, buttons: move.buttons)
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - audio
+
+    /// Capture only while enabled, not paused, and the wallpaper reads audio (a scene with
+    /// g_AudioSpectrum uniforms, or a page that registered an audio listener).
+    func updateAudio() {
+        let used = (renderer as? SceneRenderer)?.usesAudio == true || webViews.values.contains { $0.hasAudioListeners }
+        let active = audioEnabled && used && pauseReasons.isEmpty && windows.contains(where: isVisible)
+        audio.setActive(active)
+        // Web pages: push the spectrum at 30 Hz (scenes read it per frame in drawFrame).
+        let pushWeb = active && webRequest != nil
+        if pushWeb, audioTimer == nil {
+            var last = CACurrentMediaTime()
+            audioTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self, self.audio.isRunning else { return }
+                    let now = CACurrentMediaTime()
+                    let values = self.audio.analyzer.update(dt: now - last).web128
+                    last = now
+                    for (screen, web) in self.webViews where web.hasAudioListeners && self.webPaused[screen] == false {
+                        web.sendAudio(values)
+                    }
+                }
+            }
+        } else if !pushWeb, let t = audioTimer {
+            t.invalidate()
+            audioTimer = nil
+            // Leave listeners at silence rather than the last frame.
+            for web in webViews.values where web.hasAudioListeners { web.sendAudio(AudioSpectrum().web128) }
+        }
+    }
+
+    func audioStateChanged() {
+        if !audio.isRunning { frameAudio = AudioSpectrum() }
+        onStateChange?()
     }
 
     // MARK: - windows
@@ -165,6 +282,7 @@ final class WallpaperController: NSObject, MTKViewDelegate {
     func isVisible(_ w: DesktopWindow) -> Bool { w.occlusionState.contains(.visible) }
 
     func applyState() {
+        defer { updateAudio() }
         if webRequest != nil {
             // Web content: pause each screen's page while paused or fully covered (setPaused only on change).
             for w in windows {
@@ -192,14 +310,15 @@ final class WallpaperController: NSObject, MTKViewDelegate {
     var statusText: String {
         if let e = loadError { return "Error: \(e)" }
         if !pauseReasons.isEmpty { return "Paused (" + pauseReasons.map(\.rawValue).sorted().joined(separator: ", ") + ")" }
+        let audioNote = audio.statusText.map { " · \($0)" } ?? ""
         if let request = webRequest {
             let showing = webPaused.values.filter { !$0 }.count
             let kind = if case .video = request { "Video (WebKit)" } else { "Web page" }
-            return showing == 0 ? "\(kind) · paused (desktop covered)" : "\(kind) · showing on \(showing)/\(windows.count) screen(s)"
+            return showing == 0 ? "\(kind) · paused (desktop covered)" : "\(kind) · showing on \(showing)/\(windows.count) screen(s)" + audioNote
         }
         let drawing = windows.filter { !$0.metalView.isPaused }.count
         if drawing == 0 { return "Paused (desktop covered)" }
-        return String(format: "Drawing %d/%d screen(s) · %.0f fps · GPU %.1f ms", drawing, windows.count, measuredFPS, gpuMillis)
+        return String(format: "Drawing %d/%d screen(s) · %.0f fps · GPU %.1f ms", drawing, windows.count, measuredFPS, gpuMillis) + audioNote
     }
 
     // MARK: - MTKViewDelegate
@@ -215,12 +334,29 @@ final class WallpaperController: NSObject, MTKViewDelegate {
         // Advance the clock once per display refresh, not once per screen.
         let now = CACurrentMediaTime()
         if view === windows.first(where: { !$0.metalView.isPaused })?.metalView {
-            if let last = lastTick { clock += min(now - last, 0.25) }
+            let dt = lastTick.map { min(now - $0, 0.25) } ?? 0
+            clock += dt
             lastTick = now
+            if audio.isRunning { frameAudio = audio.analyzer.update(dt: dt) }
             frameCount += 1
         }
         guard let cb = renderer.queue.makeCommandBuffer() else { return }
+        let scene = renderer as? SceneRenderer
+        let window = windows.first { $0.metalView === view }
+        if let scene, let window {
+            // Per-screen cursor state; the position holds while the cursor is elsewhere.
+            var input = pointers[window.screenID] ?? SceneRenderer.PointerInput()
+            if mouseInput, let p = tracker.position(in: window.frame) {
+                input.position = p
+                input.state = PointerTracker.buttonState
+            } else {
+                input.state = .zero
+            }
+            scene.pointer = input
+            scene.audio = frameAudio
+        }
         renderer.encodeFrame(into: drawable.texture, commandBuffer: cb, time: Float(clock))
+        if let scene, let window { pointers[window.screenID] = scene.pointer }
         cb.present(drawable)
         cb.addCompletedHandler { [weak self] cb in
             let t = cb.gpuEndTime - cb.gpuStartTime
@@ -231,8 +367,9 @@ final class WallpaperController: NSObject, MTKViewDelegate {
         if now - statsStart >= 5 {
             measuredFPS = Double(frameCount) / (now - statsStart)
             gpuMillis = frameCount > 0 ? gpuTimeSum / Double(frameCount) * 1000 : 0
+            let p = window.flatMap { pointers[$0.screenID] }.map { String(format: ", pointer %.2f,%.2f", $0.position.x, $0.position.y) } ?? ""
             log(String(format: "stats: %.1f fps, GPU %.2f ms/frame, drawable %dx%d", measuredFPS, gpuMillis,
-                       Int(view.drawableSize.width), Int(view.drawableSize.height)))
+                       Int(view.drawableSize.width), Int(view.drawableSize.height)) + p)
             frameCount = 0; gpuTimeSum = 0; statsStart = now
             onStateChange?()
         }

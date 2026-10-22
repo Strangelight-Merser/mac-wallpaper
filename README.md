@@ -11,13 +11,15 @@ This project does not ship any Wallpaper Engine content. You need your own copy 
 | Area | Status |
 |---|---|
 | Desktop app | Menu-bar app, one desktop-level window per screen, pauses on lock / display sleep / fully covered screens, Low Power Mode halves the frame rate |
+| Mouse | Cursor over the desktop drives `g_PointerPosition`/`g_PointerState`, cursor effects (x-ray, ripples, fluid) and camera parallax; web pages get mouse moves and real clicks. No permission needed |
+| Audio | Optional (menu → Audio Visualization): system audio through ScreenCaptureKit (needs the Screen Recording permission) → `g_AudioSpectrum*` in scenes and `wallpaperRegisterAudioListener` in web pages. Captures only while a wallpaper uses it |
 | Formats | `.tex` textures (LZ4, DXT1/3/5, R8/RG88, embedded PNG/JPEG, 3D LUTs, GIF frame tables) |
 | Shaders | WE's GLSL dialect → SPIR-V (glslang) → MSL (SPIRV-Cross), in-process with a disk cache; 97% of the shipped shaders compile |
 | Scenes | Image layers, effect chains incl. multi-FBO effects (blur, god rays, motion blur, fluid simulation…), blend modes, HDR + bloom, user properties, hidden/cross-layer composites, static-layer caching |
 | Official effect previews | 44 of 45 render (the remaining one needs particles) |
 | Video wallpapers | mp4/mov (H.264, HEVC, AV1) and webm (VP9, AV1), hardware-decoded and drawn zero-copy through Metal; VP8 webm through WebKit; looping, cover-fit. Muted for now |
-| Web wallpapers | WKWebView with Wallpaper Engine's JavaScript API (`wallpaperPropertyListener`: user/general properties, `setPaused`; audio/media listener registration), pages served same-origin; paused pages use no CPU |
-| Not yet | Video audio, audio spectrum for web/scene wallpapers, mouse interaction, particles, text, SceneScript, 3D models, a wallpaper library UI |
+| Web wallpapers | WKWebView with Wallpaper Engine's JavaScript API (`wallpaperPropertyListener`: user/general properties, `setPaused`; audio listeners; media listener registration), pages served same-origin; paused pages use no CPU |
+| Not yet | Video audio, particles, text, SceneScript, 3D models, a wallpaper library UI |
 
 The full design, findings and roadmap (in Chinese) are in [docs/design.md](docs/design.md).
 
@@ -50,8 +52,9 @@ directly and change them from the menu-bar icon.
 
 Cases are listed in [regression/cases.txt](regression/cases.txt) (4 scenes in several variants, every
 official effect preview at two moments, self-generated test videos — `scripts/make_test_videos.sh`,
-run automatically when needed; requires ffmpeg — and web wallpapers including our own bridge fixture
-in `regression/fixtures/webtest`). References are renders of Wallpaper Engine assets, so they are
+run automatically when needed; requires ffmpeg — web wallpapers including our own bridge fixture
+in `regression/fixtures/webtest`, and mouse/audio input with synthetic pointer paths and tones, including
+our own scene fixture `regression/fixtures/audiotest`). References are renders of Wallpaper Engine assets, so they are
 not committed; they are stored in `regression/refs/` (or `$REGRESSION_REFS`). Failing cases get an
 amplified difference image in `regression/diff/`.
 
@@ -61,6 +64,7 @@ amplified difference image in `regression/diff/`.
 
 ```bash
 wecli render <wallpaper> --assets <assets> --time 3 --out frame.png   # offline render of one frame
+wecli render ... --pointer 0.2,0.8:0.6,0.4 --frames 20 --audio 60,500:2000 # with a moving cursor and test tones
 wecli bench  <wallpaper> --assets <assets> --fps 30                   # CPU/GPU cost per frame
 wecli scene  <wallpaper> --assets <assets>                            # dump layers, passes, effect FBOs
 wecli verify <folder>                                                 # decode every .tex, compare with sibling .png

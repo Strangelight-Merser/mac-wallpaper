@@ -127,10 +127,11 @@ video/av1_webm.t3.9                 regression/videos/av1_webm                  
 video/av1_webm.loop                 regression/videos/av1_webm                           --time 5 --size 1280x720
 #
 # Web wallpapers (WebKit). webtest is our own bridge fixture (regression/fixtures/webtest): property
-# types, late listener, fps, audio registration, same-origin fetch, CSS mask. Captures are taken
+# types, late listener, fps, audio listener, mouse move/click forwarding, same-origin fetch, CSS mask. Captures are taken
 # off-screen, where CSS animations and requestAnimationFrame don't advance, so they are deterministic.
 web/webtest                         regression/fixtures/webtest                          --size 1280x720
 web/webtest.props                   regression/fixtures/webtest                          --size 1280x720 --prop accent=0.1\ 0.6\ 0.9 --prop enabled=false --prop size=7 --prop caption=override
+web/webtest.input                   regression/fixtures/webtest                          --size 1280x720 --pointer 0.85,0.32 --press 1 --audio 200,1500:600
 web/corsair_o_tron                  wallpaper_engine/projects/defaultprojects/corsair_o_tron  --size 1280x720
 web/corsair_o_tron.props            wallpaper_engine/projects/defaultprojects/corsair_o_tron  --size 1280x720 --prop colorized=true --prop logocolor=1\ 0\ 0 --prop backgroundcolor=0\ 0\ 0.3 --prop logorings=false
 #
@@ -138,3 +139,18 @@ web/corsair_o_tron.props            wallpaper_engine/projects/defaultprojects/co
 video/vp8_webm.t1                   regression/videos/vp8_webm                           --time 1 --size 1280x720
 video/vp8_webm.t3.9                 regression/videos/vp8_webm                           --time 3.9 --size 1280x720
 video/vp8_webm.loop                 regression/videos/vp8_webm                           --time 5 --size 1280x720
+#
+# Mouse input (--pointer x,y with y down; --frames N moves it along x,y:x2,y2 over N frames at 30 fps).
+# xray/depthparallax read g_PointerPosition (the preview's older xray unprojects with the MVP inverse),
+# cursorripple/fluidsimulation are simulations driven by pointer motion and g_PointerState.
+effect/xray.pointer                 wallpaper_engine/assets/effects/xray/preview         --time 1 --size 256x256 --pointer 0.2,0.8
+effect/depthparallax.pointer        wallpaper_engine/assets/effects/depthparallax/preview --time 2 --size 256x256 --frames 10 --pointer 0.9,0.1
+effect/cursorripple.drag            wallpaper_engine/assets/effects/cursorripple/preview --time 2 --size 256x256 --frames 20 --pointer 0.2,0.8:0.6,0.4
+effect/fluidsimulation.drag         wallpaper_engine/assets/effects/fluidsimulation/preview --time 2 --size 256x256 --frames 30 --pointer 0.2,0.2:0.8,0.8 --press 1
+#
+# Audio (--audio: spectrum of synthetic tones, left:right). audiotest is our own fixture
+# (regression/fixtures/audiotest) built from stock effects: pulse on the left / right channel (black when
+# silent, orange / blue with audio) and the current xray shader (g_EffectTextureProjectionMatrixInverse).
+fixture/audiotest.silent            regression/fixtures/audiotest                        --time 1 --size 768x256
+fixture/audiotest.tones             regression/fixtures/audiotest                        --time 1 --size 768x256 --audio 60,120,250,500,1000,2000,4000:80,300,3000 --pointer 0.85,0.3
+fixture/audiotest.right             regression/fixtures/audiotest                        --time 1 --size 768x256 --audio 60:2000,4000 --pointer 0.7,0.9

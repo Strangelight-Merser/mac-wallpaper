@@ -26,6 +26,9 @@ public final class WebWallpaper: NSObject, WKNavigationDelegate, WKScriptMessage
     private var loadWaiters: [CheckedContinuation<Void, Error>] = []
     private var loadError: Error?
     public var onWarning: ((String) -> Void)?
+    /// The page registered an audio listener (`wallpaperRegisterAudioListener`).
+    public private(set) var hasAudioListeners = false
+    public var onAudioListener: (() -> Void)?
 
     /// Content for what `Wallpaper.open` handed over (`WallpaperError.needsWebKit`).
     public convenience init(request: WebContentRequest, fps: Int = 30) {
@@ -94,6 +97,38 @@ public final class WebWallpaper: NSObject, WKNavigationDelegate, WKScriptMessage
         webView.evaluateJavaScript("window.__we.setUserProperties(\(String(decoding: data, as: UTF8.self)))")
     }
 
+    /// Forward a click at `point` (CSS pixels from the top-left): WebKit gets real NSEvents, so the page
+    /// sees trusted `mousedown`/`mouseup`/`click` (focus, links and buttons behave). The desktop window
+    /// itself ignores the mouse; the app calls this for clicks it saw over the desktop.
+    public func sendMouse(_ type: NSEvent.EventType, at point: CGPoint) {
+        guard let window = webView.window else { return }
+        let down: Set<NSEvent.EventType> = [.leftMouseDown, .rightMouseDown]
+        guard let event = NSEvent.mouseEvent(
+            with: type, location: webView.convert(point, to: nil), modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+            eventNumber: 0, clickCount: 1, pressure: down.contains(type) ? 1 : 0) else { return }
+        switch type {
+        case .leftMouseDown: webView.mouseDown(with: event)
+        case .leftMouseUp: webView.mouseUp(with: event)
+        case .rightMouseDown: webView.rightMouseDown(with: event)
+        case .rightMouseUp: webView.rightMouseUp(with: event)
+        default: break
+        }
+    }
+
+    /// Cursor movement. WebKit drops real mouse-moved events for a window that is not key (the desktop
+    /// window never is), so the page gets synthesized `pointermove`/`mousemove` (plus over/out when the
+    /// element under the cursor changes). They are untrusted and CSS `:hover` does not apply.
+    public func sendMouseMove(to point: CGPoint, buttons: Int = 0) {
+        webView.evaluateJavaScript("window.__we && window.__we.pointerMove(\(point.x), \(point.y), \(buttons))")
+    }
+
+    /// Deliver one audio frame (128 values) to the page's `wallpaperRegisterAudioListener` callbacks.
+    public func sendAudio(_ values: [Float]) {
+        let list = values.map { String(format: "%.4g", $0) }.joined(separator: ",")
+        webView.evaluateJavaScript("window.__we && window.__we.audio([\(list)])")
+    }
+
     public func setFPS(_ fps: Int) {
         webView.evaluateJavaScript("window.__we.setGeneralProperties({fps: \(fps)})")
     }
@@ -158,8 +193,13 @@ public final class WebWallpaper: NSObject, WKNavigationDelegate, WKScriptMessage
     }
 
     public func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-        guard let body = message.body as? [String: Any], let text = body["message"] as? String else { return }
-        warn(text)
+        guard let body = message.body as? [String: Any] else { return }
+        if body["audioListener"] != nil {
+            hasAudioListeners = true
+            onAudioListener?()
+        } else if let text = body["message"] as? String {
+            warn(text)
+        }
     }
 
     func warn(_ w: String) {
@@ -190,9 +230,13 @@ public final class WebWallpaper: NSObject, WKNavigationDelegate, WKScriptMessage
             get: () => listener,
             set: (value) => { listener = value; setTimeout(deliver, 0); },
           });
-          // Audio spectrum (128 values, left 0-63 / right 64-127): no capture yet, so listeners stay idle.
+          // Audio spectrum (128 values, left 0-63 / right 64-127), pushed by the app while audio is captured.
           const audioListeners = [];
-          window.wallpaperRegisterAudioListener = (cb) => { if (typeof cb === 'function') audioListeners.push(cb); };
+          window.wallpaperRegisterAudioListener = (cb) => {
+            if (typeof cb !== 'function') return;
+            audioListeners.push(cb);
+            try { window.webkit.messageHandlers.we.postMessage({ audioListener: true }); } catch (e) {}
+          };
           for (const name of ['wallpaperRegisterMediaStatusListener', 'wallpaperRegisterMediaPropertiesListener',
                               'wallpaperRegisterMediaThumbnailListener', 'wallpaperRegisterMediaPlaybackListener',
                               'wallpaperRegisterMediaTimelineListener']) {
@@ -204,7 +248,26 @@ public final class WebWallpaper: NSObject, WKNavigationDelegate, WKScriptMessage
             setGeneralProperties: (p) => { state.general = Object.assign(state.general || {}, p); if (listener && listener.applyGeneralProperties) { try { listener.applyGeneralProperties(p); } catch (e) { report(e); } } },
             setPaused: (p) => { state.paused = p; if (listener && listener.setPaused) { try { listener.setPaused(p); } catch (e) { report(e); } } },
             audioListenerCount: () => audioListeners.length,
+            audio: (a) => { for (const cb of audioListeners) { try { cb(a); } catch (e) { report('audio listener: ' + e); } } },
+            pointerMove: (x, y, buttons) => {
+              const el = document.elementFromPoint(x, y) || document.documentElement;
+              const init = { clientX: x, clientY: y, screenX: x, screenY: y, buttons, bubbles: true, cancelable: true, composed: true, view: window };
+              const fire = (target, type, related) => {
+                const props = Object.assign({ relatedTarget: related || null }, init);
+                if (type.startsWith('pointer')) target.dispatchEvent(new PointerEvent(type, Object.assign({ pointerId: 1, pointerType: 'mouse', isPrimary: true }, props)));
+                else target.dispatchEvent(new MouseEvent(type, props));
+              };
+              try {
+                if (el !== hovered) {
+                  if (hovered) { fire(hovered, 'pointerout', el); fire(hovered, 'mouseout', el); }
+                  fire(el, 'pointerover', hovered); fire(el, 'mouseover', hovered);
+                  hovered = el;
+                }
+                fire(el, 'pointermove'); fire(el, 'mousemove');
+              } catch (e) { report('pointer: ' + e); }
+            },
           };
+          let hovered = null;
           window.addEventListener('error', (e) => report('page error: ' + e.message + (e.filename ? ' (' + e.filename.split('/').pop() + ':' + e.lineno + ')' : '')));
           window.addEventListener('unhandledrejection', (e) => report('unhandled rejection: ' + e.reason));
         })();

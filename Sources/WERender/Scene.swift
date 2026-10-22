@@ -164,12 +164,23 @@ public struct SceneDescription {
         public let effectNames: [String]
         /// FBOs declared by each effect, indexed like `Pass.effect`.
         public let effectFBOs: [[EffectFBO]]
+        /// How far the layer moves with camera parallax (added to the scene's `amount`).
+        public let parallaxDepth: SIMD2<Float>
+    }
+
+    /// Camera parallax: layers follow the cursor (`general.cameraparallax*`).
+    public struct Parallax {
+        public let enabled: Bool
+        public let amount: Float
+        public let delay: Float
+        public let mouseInfluence: Float
     }
 
     public let canvas: SIMD2<Float>
     public let clearColor: SIMD3<Float>
     public let hdr: Bool
     public let bloom: (enabled: Bool, strength: Float, threshold: Float)
+    public let parallax: Parallax
     public let layers: [ImageLayer]
     public let properties: UserProperties
     /// Objects/effects skipped or approximated, for reporting.
@@ -197,6 +208,9 @@ public struct SceneDescription {
         bloom = (props.bool(general["bloom"], default: false),
                  hdr ? f("bloomhdrstrength", 2) : f("bloomstrength", 2),
                  hdr ? f("bloomhdrthreshold", 1) : f("bloomthreshold", 0.65))
+        parallax = Parallax(enabled: props.bool(general["cameraparallax"], default: false),
+                            amount: f("cameraparallaxamount", 0.5), delay: f("cameraparallaxdelay", 0.1),
+                            mouseInfluence: f("cameraparallaxmouseinfluence", 0))
 
         var layers: [ImageLayer] = []
         var notes: [String] = []
@@ -280,6 +294,7 @@ public struct SceneDescription {
                 (model["width"] as? NSNumber)?.floatValue ?? 0, (model["height"] as? NSNumber)?.floatValue ?? 0]
             let col = parseFloats(props.resolve(obj["color"])) ?? [1, 1, 1]
             let fullscreen = (model["fullscreen"] as? Bool) == true
+            let depth = parseFloats(props.resolve(obj["parallaxDepth"])) ?? [0, 0]
             layers.append(ImageLayer(
                 id: (obj["id"] as? NSNumber)?.intValue ?? -1, name: name,
                 origin: fullscreen ? SIMD3(canvas.x / 2, canvas.y / 2, 0) : v3("origin", 0),
@@ -293,7 +308,8 @@ public struct SceneDescription {
                 passthrough: (model["passthrough"] as? Bool) == true, fullscreen: fullscreen,
                 dependencies: (obj["dependencies"] as? [Any] ?? []).compactMap { ($0 as? NSNumber)?.intValue },
                 visible: visible,
-                passes: passes, effectNames: effectNames, effectFBOs: effectFBOs))
+                passes: passes, effectNames: effectNames, effectFBOs: effectFBOs,
+                parallaxDepth: SIMD2(depth[0], depth[safe: 1] ?? depth[0])))
         }
         self.layers = layers
         self.notes = notes
