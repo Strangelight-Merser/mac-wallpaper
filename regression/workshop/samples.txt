@@ -1,0 +1,25 @@
+# Workshop test samples (Wallpaper Engine, app 431960): IDs and metadata only, no content.
+# Put each item's folder (Steam: steamapps/workshop/content/431960/<id>/) under samples/workshop/<id>/.
+# id          type   size_MB  features | title
+1155728109  Scene      6.4  - | Anime girl drinking coffee
+1780592523  Video     10.8  - | 你的名字
+2005884365  Scene     10.9  Audioresponsive,Customizable | Zero Two - Darling in the FranXX
+2179534274  Scene     39.7  - | 女孩短发连衣裙白色裤袜樱花动漫壁纸
+2828134691  Scene      5.8  - | Honkai: Star Rail Bronya
+2905017768  Web      651.5  Audioresponsive,Customizable,Dynamicresolution | Bocchi the Rock! ぼっち・ざ・ろっく！(Album)
+2930987618  Scene      9.0  - | Yamada Ryo [Vending Machine]
+2988246977  Video     22.4  - | [4K60] PERSONA3 Reload - ゆうきまこと Yuuki Makoto 结城理
+2996321829  Scene      4.0  - | Honkai: Star Rail Jingliu
+3146703458  Scene    138.1  Customizable,VideoTexture | Persona 3 reload/女神异闻录3 reload 音乐播放器
+3151551777  Scene     71.5  Audioresponsive,Customizable,MediaIntegration | Persona 3 Reload [4K + Day/Night cycle]
+3230226094  Scene      5.6  Audioresponsive,Customizable,MediaIntegration | [GBC]Girls Band Cry！PC壁纸
+3265802028  Scene     17.3  Audioresponsive,Customizable | Demon Slayer - Shinobu Kocho [4K]
+3272717573  Video     42.2  - | 山晚-三叶-三葉漫剪
+3284202576  Scene      8.7  - | GBC
+3304555869  Scene     21.8  - | 芸草冰-GBC壁纸01
+3310370498  Scene      4.3  Audioresponsive,MediaIntegration | nina
+3367902810  Scene      5.2  - | [GBC]運命の華 自制壁纸 16：9 红色
+3385540784  Scene     18.1  Audioresponsive,Customizable,MediaIntegration | Alone. and Sad.
+3427473723  Scene     23.9  Customizable | Ender Shinobu Kocho (Demon Slayer) WUHD (4K)
+3465215190  Scene     12.9  Audioresponsive,Customizable,PuppetWarp,MediaIntegration | Rainy Day
+3558034522  Scene     25.4  Audioresponsive,Customizable,PuppetWarp | [Wakaba Mutsumi]Fresh summer - It's MyGO!!!!!/AveMujica
