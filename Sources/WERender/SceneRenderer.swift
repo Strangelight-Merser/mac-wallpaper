@@ -307,6 +307,13 @@ public final class SceneRenderer: WallpaperRenderer {
         return passes
     }
 
+    /// materials/util/effectpassthrough: draws a layer's FBO into the scene at the layer's quad.
+    lazy var passthroughPass: SceneDescription.Pass? = {
+        guard let mp = ((try? locator.json("materials/util/effectpassthrough.json"))?["passes"] as? [[String: Any]])?.first
+        else { return nil }
+        return SceneDescription.Pass(material: mp, label: "passthrough")
+    }()
+
     lazy var bloomPasses: [(pass: SceneDescription.Pass, inputs: [String], target: String)] = {
         let constants: [String: Any] = ["bloomstrength": scene.bloom.strength, "bloomthreshold": scene.bloom.threshold]
         var out: [(SceneDescription.Pass, [String], String)] = []
@@ -438,6 +445,16 @@ public final class SceneRenderer: WallpaperRenderer {
             kept = kept.filter { $0.element.effect.map { !hidden.contains($0) } ?? true }
             // The layer's blending sits on its last pass (see `layerPasses`); move it to the new last pass.
             if !kept.isEmpty { kept[kept.count - 1].element.blending = blending }
+        }
+        // A passthrough layer's first pass (composelayer) fills the whole target with what lies behind the
+        // quad, so it must go into the layer's FBO and be drawn back by a later pass. With every effect
+        // hidden only that pass is left: add WE's effectpassthrough to draw the FBO back in place, or the
+        // region behind the quad would be stretched over the whole scene.
+        if layer.passthrough, kept.count == 1, let pass = passthroughPass {
+            var back = pass
+            back.blending = kept[0].element.blending
+            kept[0].element.blending = "normal"
+            kept.append((offset: layerPasses[index].count, element: back))
         }
         let passes = kept.map(\.element)
         let size = layerSizes[index]

@@ -1,0 +1,25 @@
+{
+	"general" : {
+		"clearcolor" : "0.1 0.1 0.1",
+		"orthogonalprojection" : { "width" : 768, "height" : 256 }
+	},
+	"objects" : [
+		{ "id" : 1, "name" : "background", "image" : "models/clouds.json", "origin" : "384 128 0", "size" : "768 256", "visible" : true },
+		{
+			"id" : 2, "name" : "compose, effect hidden", "image" : "models/util/composelayer.json",
+			"origin" : "192 128 0", "size" : "200 120", "visible" : true,
+			"effects" : [ { "file" : "effects/tint/effect.json", "visible" : false,
+				"passes" : [ { "constantshadervalues" : { "alpha" : 1, "color" : "1 0 0" } } ] } ]
+		},
+		{
+			"id" : 3, "name" : "compose, effect shown", "image" : "models/util/composelayer.json",
+			"origin" : "576 128 0", "size" : "200 120", "visible" : true,
+			"effects" : [ { "file" : "effects/tint/effect.json", "visible" : true,
+				"passes" : [ { "constantshadervalues" : { "alpha" : 1, "color" : "0.2 0.4 1" } } ] } ]
+		},
+		{
+			"id" : 4, "name" : "compose, no effects", "image" : "models/util/composelayer.json",
+			"origin" : "384 60 0", "size" : "120 60", "visible" : true
+		}
+	]
+}

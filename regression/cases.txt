@@ -176,3 +176,8 @@ fixture/scripttest.frames           regression/fixtures/scripttest              
 fixture/scripttest.props            regression/fixtures/scripttest                       --time 3 --size 1024x512 --prop showseconds=false
 fixture/scripttest.hover            regression/fixtures/scripttest                       --time 1 --size 1024x512 --pointer 0.83,0.414
 fixture/scripttest.press            regression/fixtures/scripttest                       --time 1 --size 1024x512 --pointer 0.83,0.414 --press 1
+#
+# Composition layers (regression/fixtures/composetest): with no visible effect a composition layer must
+# leave the scene unchanged (it once stretched the region behind it over the whole frame); with one,
+# only its quad changes.
+fixture/composetest                 regression/fixtures/composetest                      --time 1 --size 768x256
