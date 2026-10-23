@@ -1,8 +1,7 @@
 #!/bin/zsh
 # Release build with SwiftPM (needs Xcode 26.3+, selected via xcode-select), then wrap the app
-# executable into MacWallpaper.app (menu-bar app: LSUIElement). Signed with the "mac-wallpaper development"
-# identity if scripts/setup-signing.sh has set it up (stable across builds, so Keychain access is
-# remembered), otherwise ad-hoc.
+# executable into MacWallpaper.app (menu-bar app: LSUIElement). Signed with an Apple Development identity if there is
+# one, else "mac-wallpaper development" (scripts/setup-signing.sh), else ad-hoc.
 set -euo pipefail
 cd "${0:A:h}/.."
 swift build -c release
@@ -29,8 +28,12 @@ cat > $APP/Contents/Info.plist <<PLIST
   <key>NSHighResolutionCapable</key><true/>
 </dict></plist>
 PLIST
-IDENTITY="mac-wallpaper development"
-if security find-identity -v -p codesigning | grep -q "\"$IDENTITY\""; then
+# An Apple Development certificate (free Apple ID in Xcode) carries a team ID: the Keychain then keeps
+# granting access across rebuilds. Without one, macOS keys Keychain access to each build's code hash.
+IDENTITIES=$(security find-identity -v -p codesigning)
+IDENTITY=$(print -r -- "$IDENTITIES" | sed -n 's/.*"\(Apple Development: [^"]*\)".*/\1/p' | head -1)
+[[ -z $IDENTITY ]] && print -r -- "$IDENTITIES" | grep -q '"mac-wallpaper development"' && IDENTITY="mac-wallpaper development"
+if [[ -n $IDENTITY ]]; then
   codesign --force --sign "$IDENTITY" $APP
 else
   codesign --force --sign - $APP >/dev/null 2>&1 || true
