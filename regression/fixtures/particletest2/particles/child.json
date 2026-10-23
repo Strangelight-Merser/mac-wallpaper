@@ -1,0 +1,41 @@
+{
+  "material": "materials/particle/halo.json",
+  "maxcount": 60,
+  "starttime": 0,
+  "emitter": [
+    {
+      "name": "boxrandom",
+      "rate": 15,
+      "distancemax": 0,
+      "instantaneous": 1
+    }
+  ],
+  "initializer": [
+    {
+      "name": "lifetimerandom",
+      "min": 1.2,
+      "max": 1.2
+    },
+    {
+      "name": "sizerandom",
+      "min": 12,
+      "max": 12
+    },
+    {
+      "name": "velocityrandom",
+      "min": "0 -20 0",
+      "max": "0 -20 0"
+    }
+  ],
+  "operator": [
+    {
+      "name": "movement",
+      "gravity": "0 0 0"
+    },
+    {
+      "name": "alphafade",
+      "fadeintime": 0.1,
+      "fadeouttime": 0.8
+    }
+  ]
+}

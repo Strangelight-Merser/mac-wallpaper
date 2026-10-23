@@ -49,12 +49,12 @@ final class ParticleDescriptionTests: ParticleTestCase {
         XCTAssertTrue(d.notes.contains("test: particle event child death not supported"))
     }
 
-    func testUnknownElementsAndRopeNotes() throws {
+    func testUnknownElementsAndRopeSupport() throws {
         let d = try description(["emitter": [["name": "unknownE"]], "initializer": [["name": "unknownI"]],
             "operator": [["name": "unknownO"]], "renderer": [["name": "ropetrail"], ["name": "unknownR"]]])
         XCTAssertTrue(d.emitters.isEmpty); XCTAssertTrue(d.initializers.isEmpty); XCTAssertTrue(d.operators.isEmpty)
-        XCTAssertFalse(d.canRender)
-        for name in ["unknownE", "unknownI", "unknownO", "ropetrail", "unknownR"] {
+        XCTAssertTrue(d.canRender)
+        for name in ["unknownE", "unknownI", "unknownO", "unknownR"] {
             XCTAssertTrue(d.notes.contains(where: { $0.contains(name) && $0.hasSuffix("not supported") }))
         }
     }

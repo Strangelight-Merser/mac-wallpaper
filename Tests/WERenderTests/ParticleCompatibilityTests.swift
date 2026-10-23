@@ -9,7 +9,9 @@ final class ParticleCompatibilityTests: ParticleTestCase {
         let shaders = folder.appendingPathComponent("shaders")
         try FileManager.default.createDirectory(at: shaders, withIntermediateDirectories: true)
         for ext in ["vert", "frag"] {
-            try Data("void main() {}".utf8).write(to: shaders.appendingPathComponent("genericparticle.\(ext)"))
+            for name in ["genericparticle", "genericropeparticle"] {
+                try Data("void main() {}".utf8).write(to: shaders.appendingPathComponent("\(name).\(ext)"))
+            }
         }
         return await CompatibilityChecker(assets: folder).check(WallpaperEntry(folder: folder, root: .userFolder), deep: false)
     }
@@ -27,7 +29,7 @@ final class ParticleCompatibilityTests: ParticleTestCase {
         XCTAssertTrue(result.notes.contains(where: { $0.contains("unimplemented") }))
         XCTAssertTrue(result.notes.contains(where: { $0.contains("event child death") }))
         let rope = try await check(["material": "material.json", "renderer": [["name": "ropetrail"]]])
-        XCTAssertEqual(rope.status, .unsupported); XCTAssertEqual(rope.missing[.particles], 1)
+        XCTAssertEqual(rope.status, .supported); XCTAssertNil(rope.missing[.particles])
     }
 
     func testParticleTextureMissingReportedAsAsset() async throws {
@@ -36,4 +38,12 @@ final class ParticleCompatibilityTests: ParticleTestCase {
         XCTAssertEqual(result.status, .unsupported); XCTAssertEqual(result.missing[.missingAsset], 1)
         XCTAssertNil(result.missing[.particles])
     }
+    func testEventChildrenAreSupported() async throws {
+        let result = try await check(["material": "material.json", "children":
+            ["eventspawn", "eventdeath", "eventfollow"].map { ["type": $0, "particle": ["material": "material.json"]] as [String: Any] }])
+        XCTAssertEqual(result.status, .supported)
+        XCTAssertNil(result.missing[.particles])
+        XCTAssertTrue(result.notes.isEmpty)
+    }
+
 }

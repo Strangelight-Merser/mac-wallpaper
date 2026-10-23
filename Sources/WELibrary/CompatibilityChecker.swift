@@ -28,7 +28,7 @@ public struct Compatibility: Codable, Sendable, Equatable {
 
 /// Checks local assets and unsupported features without needing a GPU for static checks.
 public struct CompatibilityChecker: Sendable {
-    public static let version = 6
+    public static let version = 7
     private let assets: URL?
 
     public init(assets: URL?) { self.assets = assets }

@@ -3,6 +3,7 @@ import Foundation
 import Metal
 import simd
 import WEFormat
+import WEShader
 
 /// The packed 17-float genericparticle layout; kept independent of Metal for CPU tests.
 enum ParticleVertices {
@@ -61,19 +62,57 @@ final class ParticleRenderState {
     let simulation: ParticleSimulation
     var vertices: [Float] = []
     var buffers: [[MTLBuffer?]] = []
-    init(_ description: ParticleSystemDescription) {
-        simulation = ParticleSimulation(description)
+    init(_ description: ParticleSystemDescription, simulation: ParticleSimulation? = nil) {
+        self.simulation = simulation ?? ParticleSimulation(description)
         buffers = Array(repeating: Array(repeating: nil, count: 3), count: description.renderers.count * description.passes.count)
     }
 }
 
 extension SceneRenderer {
+    /// Reuse the simulation tree for the scene's flattened draw list.
+    func particleState(_ index: Int) -> ParticleRenderState {
+        if let state = particleStates[index] { return state }
+        let d = scene.particles[index]
+        let parent = scene.particles.indices.first { i in scene.particles[i].children.contains { $0.seed == d.seed } }
+        let simulation: ParticleSimulation
+        if let parent {
+            simulation = particleState(parent).simulation.children.first { $0.description.seed == d.seed }!
+        } else { simulation = ParticleSimulation(d) }
+        let state = ParticleRenderState(d, simulation: simulation)
+        particleStates[index] = state
+        return state
+    }
+
+    func advanceParticle(_ index: Int, projection: simd_float4x4) {
+        let d = scene.particles[index]
+        if d.childType != .static,
+           let parent = scene.particles.indices.first(where: { i in scene.particles[i].children.contains { $0.seed == d.seed } }) {
+            advanceParticle(parent, projection: projection)
+            return
+        }
+        let state = particleState(index)
+        let mouse = projection.inverse * SIMD4(pointer.position.x * 2 - 1, 1 - pointer.position.y * 2, 0, 1)
+        func update(_ simulation: ParticleSimulation) {
+            let d = simulation.description
+            var model = d.parentTransform * particleTransform(origin: d.origin, angles: d.angles, scale: d.scale)
+            if scene.parallax.enabled {
+                let offset = (d.parallaxDepth + scene.parallax.amount) * pointer.parallax * scene.canvas.x
+                model = translation([offset.x, offset.y, 0]) * model
+            }
+            simulation.updateControlPoints(model: model, pointer: [mouse.x, mouse.y, 0])
+            simulation.children.forEach(update)
+        }
+        update(state.simulation)
+        if offlineParticles { state.simulation.advance(to: time) }
+        else { state.simulation.advanceLive(to: time) }
+    }
+
     func renderParticle(_ index: Int, projection: simd_float4x4, slot: Int) throws {
         let d = scene.particles[index]
         guard d.visible, d.canRender, onlyLayers?.contains(d.name) ?? true,
               scene.nodes[d.id] == nil || isVisible(d.id) else { return }
-        if particleStates[index] == nil { particleStates[index] = ParticleRenderState(d) }
-        let state = particleStates[index]!
+        let state = particleState(index)
+        advanceParticle(index, projection: projection)
         let viewProjection = d.flags & 4 == 0 ? projection : particlePerspective(canvas: scene.canvas, output: outputSize,
             fov: scene.particleCamera.fov, near: scene.particleCamera.near, far: scene.particleCamera.far)
         var model = d.parentTransform * particleTransform(origin: d.origin, angles: d.angles, scale: d.scale)
@@ -81,18 +120,19 @@ extension SceneRenderer {
             let offset = (d.parallaxDepth + scene.parallax.amount) * pointer.parallax * scene.canvas.x
             model = translation([offset.x, offset.y, 0]) * model
         }
-        let mouse = projection.inverse * SIMD4(pointer.position.x * 2 - 1, 1 - pointer.position.y * 2, 0, 1)
-        state.simulation.updateControlPoints(model: model, pointer: [mouse.x, mouse.y, 0])
-        if offlineParticles { state.simulation.advance(to: time) }
-        else { state.simulation.advanceLive(to: time) }
         for (r, style) in d.renderers.enumerated() {
             for (i, material) in d.passes.enumerated() {
                 let bufferIndex = r * d.passes.count + i
                 let textureName = material.textures.first ?? nil
                 let sprite = try particleTexture(textureName)
-                ParticleVertices.build(state.simulation.particles, sheet: sprite.sheet, mode: d.animationMode,
+                if let history = state.simulation.histories[r] {
+                    ParticleRopeVertices.build(state.simulation.particles, history: history,
+                                               time: Float(state.simulation.time), into: &state.vertices)
+                } else {
+                    ParticleVertices.build(state.simulation.particles, sheet: sprite.sheet, mode: d.animationMode,
                                        multiplier: d.sequenceMultiplier, trail: style.trail, into: &state.vertices)
-                let count = state.vertices.count / (4 * ParticleVertices.stride)
+                }
+                let count = state.vertices.count / (4 * (style.rope ? ParticleRopeVertices.stride : ParticleVertices.stride))
                 guard count > 0 else { continue }
                 let bytes = state.vertices.count * MemoryLayout<Float>.stride
                 if (state.buffers[bufferIndex][slot]?.length ?? 0) < bytes {
@@ -102,12 +142,18 @@ extension SceneRenderer {
                 state.vertices.withUnsafeBytes { buffer.contents().copyMemory(from: $0.baseAddress!, byteCount: $0.count) }
                 let indices = try particleIndices(count)
                 var pass = material
+                if style.rope { pass.shader = "genericropeparticle" }
                 for name in ["GS_ENABLED", "LIGHTING", "DOUBLESIDEDLIGHTING", "FOG", "FOG_DIST", "FOG_HEIGHT", "REFRACT"] { pass.combos[name] = 0 }
                 pass.combos["THICKFORMAT"] = 1
                 pass.combos["TRAILRENDERER"] = style.trail ? 1 : 0
                 pass.combos["SPRITESHEET"] = sprite.sheet == nil ? 0 : 1
                 pass.combos["SPRITESHEETBLENDNPOT"] = 0
                 if d.animationMode == "randomframe" { pass.combos["SPRITESHEETBLEND"] = 0 }
+                if style.rope {
+                    pass.combos["TRAILRENDERER"] = 0
+                    pass.combos["TRAILSCROLLALPHA"] = 0
+                    try prepareRopeProgram(pass, texture: sprite.texture)
+                }
                 let plan = try self.plan("P\(index).R\(r).\(i)", pass: pass, layer: nil, model: model,
                                          hasPrevious: false, particle: true, fixedTextures: [0: sprite.texture])
                 let values: [String: [Float]] = [
@@ -123,6 +169,42 @@ extension SceneRenderer {
                 fullFrameValid = false
             }
         }
+    }
+
+    /// The stock GS-disabled rope shader has a missing pair of parentheses in its side offset.
+    /// Compile the corrected particle-only source here, keeping shared shader loading untouched.
+    func prepareRopeProgram(_ pass: SceneDescription.Pass, texture: LoadedTexture) throws {
+        var combos = pass.combos.reduce(into: [String: Int]()) { $0[$1.key.uppercased()] = $1.value }
+        for a in try rawAnnotations(pass.shader) where a.type.hasPrefix("sampler") {
+            if let combo = a.combo, let slot = Int(a.name.dropFirst(9)), slot < pass.textures.count,
+               (slot == 0 || pass.textures[slot] != nil), combos[combo.uppercased()] == nil {
+                combos[combo.uppercased()] = 1
+            }
+        }
+        combos["TEX0FORMAT"] = combos["TEX0FORMAT"] ?? texture.formatCode
+        for (slot, name) in pass.textures.enumerated() where slot > 0 {
+            if let name, !name.hasPrefix("_rt_"), combos["TEX\(slot)FORMAT"] == nil {
+                combos["TEX\(slot)FORMAT"] = try resolveTexture(name).formatCode
+            }
+        }
+        let key = programKey(pass.shader, combos)
+        guard programs[key] == nil else { return }
+        let vs = try locator.string("shaders/genericropeparticle.vert")
+            .replacingOccurrences(of: "right * uvs.x * 2.0 - 1.0", with: "right * (uvs.x * 2.0 - 1.0)")
+        let fs = try locator.string("shaders/genericropeparticle.frag")
+        let declared = ShaderPreprocessor.scan(vs).combos.merging(ShaderPreprocessor.scan(fs).combos) { a, _ in a }
+        let overrides = declared.merging(combos) { _, b in b }
+        guard let v = ShaderPreprocessor.process(vs, stage: .vertex, fileDirectory: "shaders", locator: locator, overrides: overrides),
+              let f = ShaderPreprocessor.process(fs, stage: .fragment, fileDirectory: "shaders", locator: locator, overrides: overrides) else {
+            throw WEFormatError.unsupported("genericropeparticle: could not preprocess")
+        }
+        let compiled = try ShaderCompiler.compile(vertex: v.source, fragment: f.source)
+        let options = MTLCompileOptions(); options.languageVersion = .version2_3
+        guard let vertex = try device.makeLibrary(source: compiled.vertex.msl, options: options).makeFunction(name: "main0"),
+              let fragment = try device.makeLibrary(source: compiled.fragment.msl, options: options).makeFunction(name: "main0") else {
+            throw WEFormatError.unsupported("genericropeparticle: missing entry point")
+        }
+        programs[key] = Program(compiled: compiled, vertexFunction: vertex, fragmentFunction: fragment, annotations: v.uniforms + f.uniforms)
     }
 
     struct ParticleTexture {
@@ -178,13 +260,14 @@ extension SceneRenderer {
 
     static func particleVertexDescriptor(attributes: [String: Int]) -> MTLVertexDescriptor {
         let descriptor = MTLVertexDescriptor()
-        for item in ParticleVertices.attributes {
+        let rope = attributes["a_PositionVec4"] != nil
+        for item in rope ? ParticleRopeVertices.attributes : ParticleVertices.attributes {
             guard let index = attributes[item.name] else { continue }
             descriptor.attributes[index].format = item.components == 2 ? .float2 : item.components == 3 ? .float3 : .float4
             descriptor.attributes[index].offset = item.offset * 4
             descriptor.attributes[index].bufferIndex = vertexBufferIndex
         }
-        descriptor.layouts[vertexBufferIndex].stride = ParticleVertices.stride * 4
+        descriptor.layouts[vertexBufferIndex].stride = (rope ? ParticleRopeVertices.stride : ParticleVertices.stride) * 4
         return descriptor
     }
 }

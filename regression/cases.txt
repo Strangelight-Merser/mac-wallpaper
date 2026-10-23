@@ -192,3 +192,8 @@ fixture/videotexturetest.t0          regression/fixtures/videotexturetest       
 fixture/videotexturetest.t1          regression/fixtures/videotexturetest                  --time 1 --size 256x128
 fixture/videotexturetest.cached      regression/fixtures/videotexturetest                  --time 1 --warm 0 --size 256x128
 fixture/videotexturetest.loop        regression/fixtures/videotexturetest                  --time 2 --warm 1 --size 256x128
+#
+# Event children (spawn / death / follow), per-particle rope history, and scripted rate/alpha/colour.
+fixture/particletest2.t1            regression/fixtures/particletest2                    --time 1 --size 1024x512
+fixture/particletest2.t3            regression/fixtures/particletest2                    --time 3 --size 1024x512
+fixture/particletest2.frames        regression/fixtures/particletest2                    --time 1 --frames 90 --size 1024x512
