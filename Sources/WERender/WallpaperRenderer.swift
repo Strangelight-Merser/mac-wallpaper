@@ -4,9 +4,16 @@ import Metal
 import WEFormat
 import WEVideo
 
+/// Mapping of content onto an output with a potentially different aspect ratio.
+public enum ContentMode: String, CaseIterable, Sendable { case fill, fit, stretch }
+
 /// Anything the app and `wecli` can draw: scene wallpapers (`SceneRenderer`) and video wallpapers
 /// (`VideoRenderer`).
 public protocol WallpaperRenderer: AnyObject {
+    /// How content maps onto the output. Takes effect on the next frame; defaults to `.fill`.
+    var contentMode: ContentMode { get set }
+    /// Colour of the bars around `.fit` content; defaults to black.
+    var barColor: SIMD3<Float> { get set }
     var device: MTLDevice { get }
     var queue: MTLCommandQueue { get }
     /// Human-readable notes about anything skipped or approximated.

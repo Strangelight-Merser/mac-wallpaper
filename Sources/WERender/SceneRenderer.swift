@@ -18,6 +18,8 @@ import WEShader
 ///   the layer quad into the scene target.
 /// Scene bloom reuses WE's own bloom shaders on `_rt_FullFrameBuffer`.
 public final class SceneRenderer: WallpaperRenderer {
+    public var contentMode: ContentMode = .fill
+    public var barColor = SIMD3<Float>(repeating: 0)
     public let device: MTLDevice
     public let queue: MTLCommandQueue
     let locator: AssetLocator
@@ -163,7 +165,7 @@ public final class SceneRenderer: WallpaperRenderer {
 
     // MARK: - frame
 
-    /// Render one frame at `time` seconds into a `width`×`height` image, cover-fitting the canvas.
+    /// Render one frame at `time` seconds into a `width`×`height` image using `contentMode`.
     public func render(width: Int, height: Int, time: Float) throws -> CGImage {
         let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba8Unorm, width: width, height: height, mipmapped: false)
         d.usage = [.renderTarget, .shaderRead]
@@ -200,7 +202,7 @@ public final class SceneRenderer: WallpaperRenderer {
         fullFrameValid = false
         self.commandBuffer = commandBuffer
 
-        let projection = coverProjection(output: outputSize)
+        let projection = contentProjection(canvas: scene.canvas, output: outputSize, mode: contentMode)
         worldCache = [:]
         // Text boxes are laid out before scripts (cursor hit tests need their size) and again after
         // (scripts may change the text); unchanged text is not laid out twice.
@@ -209,6 +211,9 @@ public final class SceneRenderer: WallpaperRenderer {
         updateTextLayers()
         let c = scene.clearColor
         _ = encoder(for: sceneTarget, clear: MTLClearColor(red: Double(c.x), green: Double(c.y), blue: Double(c.z), alpha: 1))
+        if contentMode == .fit {
+            do { try clearFitBars() } catch { warn("fit bars: \(error)") }
+        }
         let particleSlot = scene.particles.isEmpty ? 0 : particleRing.acquire(commandBuffer)
         for object in renderOrder {
             switch object {
@@ -217,6 +222,14 @@ public final class SceneRenderer: WallpaperRenderer {
                 guard onlyLayers?.contains(layer.name) ?? true else { continue }
                 do { try renderLayer(i, projection: projection) } catch { warn("\(layer.name): \(error)") }
             case .particle(let i):
+                // Perspective particles construct their own cover projection. Apply the same
+                // clip-space correction to their MVP and view-projection uniforms at submission.
+                if contentMode != .fill, scene.particles[i].flags & 4 != 0 {
+                    let fill = contentProjection(canvas: scene.canvas, output: outputSize, mode: .fill)
+                    particleProjectionAdjustment = scaling([projection.columns.0.x / fill.columns.0.x,
+                                                            projection.columns.1.y / fill.columns.1.y, 1])
+                }
+                defer { particleProjectionAdjustment = nil }
                 do { try renderParticle(i, projection: projection, slot: particleSlot) }
                 catch { warn("\(scene.particles[i].name): \(error)") }
             }
@@ -779,11 +792,22 @@ public final class SceneRenderer: WallpaperRenderer {
         return plan
     }
 
+    var particleProjectionAdjustment: simd_float4x4?
+
     static let trace = ProcessInfo.processInfo.environment["WE_TRACE"] != nil
 
     func execute(_ plan: PassPlan, previous: LoadedTexture?, bindPrevious: LoadedTexture? = nil, target: MTLTexture, clear: Bool,
                  mvp: simd_float4x4, half: SIMD2<Float>, first: Bool,
                  particle: ParticleGeometry? = nil, particleValues: [String: [Float]] = [:]) throws {
+        var mvp = mvp
+        var particleValues = particleValues
+        if let adjustment = particleProjectionAdjustment, particle != nil {
+            mvp = adjustment * mvp
+            if let values = particleValues["g_ViewProjectionMatrix"] {
+                let columns = stride(from: 0, to: 16, by: 4).map { SIMD4(values[$0], values[$0 + 1], values[$0 + 2], values[$0 + 3]) }
+                particleValues["g_ViewProjectionMatrix"] = (adjustment * simd_float4x4(columns)).flat
+            }
+        }
         if Self.trace {
             print("  pass \(plan.label) [\(plan.programKey)] -> \(target.label ?? "?") \(target.width)x\(target.height) clear=\(clear) inputs=\(plan.inputs.sorted { $0.key < $1.key }.map { "\($0.key):\($0.value)" })")
         }
@@ -897,6 +921,7 @@ public final class SceneRenderer: WallpaperRenderer {
         rp.colorAttachments[0].storeAction = .store
         let enc = commandBuffer.makeRenderCommandEncoder(descriptor: rp)!
         frameEncoders += 1
+        if contentMode == .fit, target === sceneTarget { enc.setScissorRect(contentScissor) }
         currentEncoder = enc
         currentTarget = target
         return enc
@@ -1178,18 +1203,70 @@ public final class SceneRenderer: WallpaperRenderer {
 
     // MARK: - output
 
-    func coverProjection(output: SIMD2<Float>) -> simd_float4x4 {
-        let canvas = scene.canvas
-        let s = max(output.x / canvas.x, output.y / canvas.y)
-        let visible = output / s
-        let lo = (canvas - visible) / 2, hi = lo + visible
-        return ortho(left: lo.x, right: hi.x, bottom: lo.y, top: hi.y)
+    /// Pixel-centre coverage of the projected canvas, shared by scene draws and bar clears.
+    var contentScissor: MTLScissorRect {
+        let visible = contentVisibleSize(canvas: scene.canvas, output: outputSize, mode: .fit)
+        let inset = (outputSize - scene.canvas / visible * outputSize) / 2
+        let x = max(0, Int(ceil(inset.x - 0.5))), y = max(0, Int(ceil(inset.y - 0.5)))
+        let right = min(Int(outputSize.x), Int(ceil(outputSize.x - inset.x - 0.5)))
+        let bottom = min(Int(outputSize.y), Int(ceil(outputSize.y - inset.y - 0.5)))
+        return MTLScissorRect(x: x, y: y, width: right - x, height: bottom - y)
+    }
+
+    var barPipeline: MTLRenderPipelineState?
+    func clearFitBars() throws {
+        if barPipeline == nil {
+            let source = """
+            #include <metal_stdlib>
+            using namespace metal;
+            vertex float4 bar_vs(uint id [[vertex_id]]) {
+                float2 p = float2((id << 1) & 2, id & 2);
+                return float4(p * 2 - 1, 0, 1);
+            }
+            fragment float4 bar_fs(constant float3 &color [[buffer(0)]]) { return float4(color, 1); }
+            """
+            let library = try device.makeLibrary(source: source, options: nil)
+            let descriptor = MTLRenderPipelineDescriptor()
+            descriptor.vertexFunction = library.makeFunction(name: "bar_vs")
+            descriptor.fragmentFunction = library.makeFunction(name: "bar_fs")
+            descriptor.colorAttachments[0].pixelFormat = sceneTarget.pixelFormat
+            barPipeline = try device.makeRenderPipelineState(descriptor: descriptor)
+        }
+        let enc = encoder(for: sceneTarget, clear: nil)
+        enc.setRenderPipelineState(barPipeline!)
+        var color = barColor
+        enc.setFragmentBytes(&color, length: MemoryLayout<SIMD3<Float>>.stride, index: 0)
+        let r = contentScissor, w = Int(outputSize.x), h = Int(outputSize.y)
+        let bars = [MTLScissorRect(x: 0, y: 0, width: w, height: r.y),
+                    MTLScissorRect(x: 0, y: r.y + r.height, width: w, height: h - r.y - r.height),
+                    MTLScissorRect(x: 0, y: r.y, width: r.x, height: r.height),
+                    MTLScissorRect(x: r.x + r.width, y: r.y, width: w - r.x - r.width, height: r.height)]
+        for bar in bars where bar.width > 0 && bar.height > 0 {
+            enc.setScissorRect(bar)
+            enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+        }
+        enc.setScissorRect(r)
     }
 
     func readback(_ t: MTLTexture) throws -> CGImage { try readbackImage(t, device: device, queue: queue) }
 }
 
 // MARK: - math
+
+/// Canvas-space extent visible through the output, including bars for fit.
+func contentVisibleSize(canvas: SIMD2<Float>, output: SIMD2<Float>, mode: ContentMode) -> SIMD2<Float> {
+    if mode == .stretch { return canvas }
+    let ratios = output / canvas
+    let scale = mode == .fill ? max(ratios.x, ratios.y) : min(ratios.x, ratios.y)
+    return output / scale
+}
+
+/// Pure projection math: canvas coordinates are y-up; output clip coordinates span -1...1.
+func contentProjection(canvas: SIMD2<Float>, output: SIMD2<Float>, mode: ContentMode) -> simd_float4x4 {
+    let visible = contentVisibleSize(canvas: canvas, output: output, mode: mode)
+    let lo = (canvas - visible) / 2, hi = lo + visible
+    return ortho(left: lo.x, right: hi.x, bottom: lo.y, top: hi.y)
+}
 
 func ortho(left l: Float, right r: Float, bottom b: Float, top t: Float) -> simd_float4x4 {
     simd_float4x4(columns: (SIMD4(2 / (r - l), 0, 0, 0), SIMD4(0, 2 / (t - b), 0, 0), SIMD4(0, 0, -1, 0),

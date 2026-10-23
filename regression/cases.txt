@@ -181,3 +181,9 @@ fixture/scripttest.press            regression/fixtures/scripttest              
 # leave the scene unchanged (it once stretched the region behind it over the whole frame); with one,
 # only its quad changes.
 fixture/composetest                 regression/fixtures/composetest                      --time 1 --size 768x256
+
+# Content mapping at the user's non-16:9 screen size (reviewer blesses references).
+scene/razer_bedroom.fit             razer_bedroom                                        --time 3 --size 1440x932 --mode fit
+scene/razer_bedroom.stretch         razer_bedroom                                        --time 3 --size 1440x932 --mode stretch
+video/h264_mp4.fit                 regression/videos/h264_mp4                           --time 1 --size 1440x932 --mode fit
+video/h264_mp4.stretch             regression/videos/h264_mp4                           --time 1 --size 1440x932 --mode stretch

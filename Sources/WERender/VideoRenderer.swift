@@ -6,8 +6,10 @@ import WEFormat
 import WEVideo
 
 /// Video wallpapers: decoded BGRA frames (VideoToolbox, via `VideoSource`) imported zero-copy into Metal
-/// and cover-fitted to the output.
+/// and mapped to the output according to `contentMode`.
 public final class VideoRenderer: WallpaperRenderer {
+    public var contentMode: ContentMode = .fill
+    public var barColor = SIMD3<Float>(repeating: 0)
     public let device: MTLDevice
     public let queue: MTLCommandQueue
     public private(set) var warnings: [String] = []
@@ -52,7 +54,7 @@ public final class VideoRenderer: WallpaperRenderer {
         let rp = MTLRenderPassDescriptor()
         rp.colorAttachments[0].texture = output
         rp.colorAttachments[0].loadAction = .clear
-        rp.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
+        rp.colorAttachments[0].clearColor = MTLClearColor(red: Double(barColor.x), green: Double(barColor.y), blue: Double(barColor.z), alpha: 1)
         rp.colorAttachments[0].storeAction = .store
         guard let enc = commandBuffer.makeRenderCommandEncoder(descriptor: rp) else { return }
         defer { enc.endEncoding() }
@@ -70,11 +72,14 @@ public final class VideoRenderer: WallpaperRenderer {
             warn("could not map video frame to a Metal texture")
             return
         }
-        // Cover-fit: scale the frame to fill the output, cropping the overflow (UV window around the centre).
-        let videoAspect = Float(texture.width) / Float(texture.height)
-        let outAspect = Float(output.width) / Float(output.height)
-        var uvScale = SIMD2<Float>(1, 1)
-        if outAspect > videoAspect { uvScale.y = videoAspect / outAspect } else { uvScale.x = outAspect / videoAspect }
+        let canvas = SIMD2(Float(texture.width), Float(texture.height))
+        let outputSize = SIMD2(Float(output.width), Float(output.height))
+        var uvScale = contentVisibleSize(canvas: canvas, output: outputSize, mode: contentMode) / canvas
+        if contentMode == .fill {
+            let videoAspect = canvas.x / canvas.y, outAspect = outputSize.x / outputSize.y
+            uvScale = [1, 1]
+            if outAspect > videoAspect { uvScale.y = videoAspect / outAspect } else { uvScale.x = outAspect / videoAspect }
+        }
         enc.setRenderPipelineState(pipeline)
         enc.setFragmentTexture(texture, index: 0)
         enc.setFragmentSamplerState(sampler, index: 0)
@@ -97,6 +102,7 @@ public final class VideoRenderer: WallpaperRenderer {
         fragment float4 video_fs(V in [[stage_in]], texture2d<float> t [[texture(0)]], sampler s [[sampler(0)]],
                                  constant float2 &uvScale [[buffer(0)]]) {
             float2 uv = (in.uv - 0.5) * uvScale + 0.5;
+            if (any(uv < 0.0) || any(uv > 1.0)) discard_fragment();
             return float4(t.sample(s, uv).rgb, 1);
         }
         """

@@ -48,6 +48,9 @@ extension SceneRenderer {
     /// are skipped, they would cover everything). Transparent layers count: wallpapers use alpha-0 shapes
     /// as hover areas.
     func layerIDs(at point: SIMD2<Float>) -> [Int] {
+        // Bars contain no interactive scene, even when a layer extends beyond the canvas.
+        if contentMode == .fit,
+           point.x < 0 || point.y < 0 || point.x > scene.canvas.x || point.y > scene.canvas.y { return [] }
         var hits: [Int] = []
         for object in renderOrder.reversed() {
             guard case .image(let i) = object else { continue }

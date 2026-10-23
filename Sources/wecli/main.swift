@@ -26,8 +26,8 @@ func usage() -> Never {
       wecli scene   <wallpaper dir> [--assets <dir>]   dump layers / passes / effect FBOs
       wecli compare <a.png> <b.png> [--tolerance N] [--diff out.png]   exit 0 = match, 1 = differ
       wecli sound   <wallpaper dir> --assets <dir> [--seconds N] [--click x,y[@s]]   mix sound objects offline, print levels
-      wecli bench   <wallpaper dir> --assets <dir> [--size WxH] [--frames N] [--cache off] [--layers a,b] [--bloom off] [--fps N]
-      wecli render  <wallpaper dir> --assets <WE assets dir> [--time t] [--size WxH] [--prop name=value]...
+      wecli bench   <wallpaper dir> --assets <dir> [--size WxH] [--mode fill|fit|stretch] [--frames N] [--cache off] [--layers a,b] [--bloom off] [--fps N]
+      wecli render  <wallpaper dir> --assets <WE assets dir> [--time t] [--size WxH] [--mode fill|fit|stretch] [--prop name=value]...
                     [--layers a,b] [--bloom off] [--cache off] [--warm t] [--target _rt_name] --out <out.png>
                     [--pointer x,y[:x2,y2]] [--press s] [--frames N] [--audio hz,hz[:hz,hz]]
                     [--clock yyyy-MM-ddTHH:mm:ss]   wall-clock time scripts see (local time; default now)
@@ -289,6 +289,9 @@ case "render":
         i += 2
     }
     guard let out = opts["--out"] else { usage() }
+    guard let contentMode = ContentMode(rawValue: opts["--mode"] ?? "fill") else {
+        fputs("invalid --mode (expected fill, fit or stretch)\n", stderr); exit(2)
+    }
     let size = (opts["--size"] ?? "1920x1080").split(separator: "x").compactMap { Int($0) }
     guard size.count == 2 else { usage() }
     let time = Float(opts["--time"] ?? "0") ?? 0
@@ -314,6 +317,7 @@ case "render":
     do {
         let renderer = try Wallpaper.open(project: URL(fileURLWithPath: args[2]),
                                           assets: opts["--assets"].map { URL(fileURLWithPath: $0) }, properties: props)
+        renderer.contentMode = contentMode
         if let scene = renderer as? SceneRenderer { // scene-only debug options
             scene.disableBloom = opts["--bloom"] == "off"
             scene.debugTarget = opts["--target"]
@@ -472,10 +476,14 @@ case "bench":
     var opts: [String: String] = [:]
     var i = 3
     while i + 1 < args.count { opts[args[i]] = args[i + 1]; i += 2 }
+    guard let contentMode = ContentMode(rawValue: opts["--mode"] ?? "fill") else {
+        fputs("invalid --mode (expected fill, fit or stretch)\n", stderr); exit(2)
+    }
     let size = (opts["--size"] ?? "2880x1864").split(separator: "x").compactMap { Int($0) }
     let frames = Int(opts["--frames"] ?? "300") ?? 300
     let renderer = try SceneRenderer(project: URL(fileURLWithPath: args[2]),
                                      assets: opts["--assets"].map { URL(fileURLWithPath: $0) })
+    renderer.contentMode = contentMode
     renderer.disableLayerCache = opts["--cache"] == "off"
     renderer.onlyLayers = opts["--layers"].map { Set($0.split(separator: ",").map(String.init)) }
     renderer.disableBloom = opts["--bloom"] == "off"
