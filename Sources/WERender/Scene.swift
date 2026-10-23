@@ -1,4 +1,5 @@
 import Foundation
+import simd
 import WEFormat
 
 /// User-adjustable properties from project.json (`general.properties`), plus CLI/app overrides.
@@ -171,6 +172,8 @@ public struct SceneDescription {
         public let effectFBOs: [[EffectFBO]]
         /// How far the layer moves with camera parallax (added to the scene's `amount`).
         public let parallaxDepth: SIMD2<Float>
+        /// World transform of the object's scene parent (`"parent"`), identity for top-level objects.
+        public let parentTransform: simd_float4x4
     }
 
     /// Camera parallax: layers follow the cursor (`general.cameraparallax*`).
@@ -225,13 +228,17 @@ public struct SceneDescription {
         var particles: [ParticleSystemDescription] = []
         var drawOrder: [SceneObject] = []
         var notes: [String] = []
-        for case let obj as [String: Any] in scene["objects"] as? [Any] ?? [] {
+        let objects = (scene["objects"] as? [Any] ?? []).compactMap { $0 as? [String: Any] }
+        let hierarchy = ObjectHierarchy(objects, properties: props)
+        for obj in objects {
             let name = obj["name"] as? String ?? "?"
+            let parent = hierarchy.parent(of: obj)
             // Hidden image layers are kept: other layers may read their composite FBO.
-            let visible = props.bool(obj["visible"])
+            let visible = props.bool(obj["visible"]) && parent.visible
             if obj["particle"] != nil {
                 do {
-                    let particle = try ParticleSystemDescription(object: obj, locator: locator, properties: props)
+                    let particle = try ParticleSystemDescription(object: obj, locator: locator, properties: props,
+                                                                 parent: parent.transform, parentVisible: parent.visible)
                     func append(_ p: ParticleSystemDescription) {
                         drawOrder.append(.particle(particles.count))
                         particles.append(p)
@@ -334,12 +341,50 @@ public struct SceneDescription {
                 dependencies: (obj["dependencies"] as? [Any] ?? []).compactMap { ($0 as? NSNumber)?.intValue },
                 visible: visible,
                 passes: passes, effectNames: effectNames, effectFBOs: effectFBOs,
-                parallaxDepth: SIMD2(depth[0], depth[safe: 1] ?? depth[0])))
+                parallaxDepth: SIMD2(depth[0], depth[safe: 1] ?? depth[0]),
+                parentTransform: fullscreen ? matrix_identity_float4x4 : parent.transform))
         }
         self.layers = layers
         self.particles = particles
         self.drawOrder = drawOrder
         self.notes = notes
+    }
+}
+
+/// Scene object parenting (`"parent": <object id>`): children are placed in their parent's space and hidden
+/// with it. Any object kind can be a parent, including plain group objects that only have a transform.
+struct ObjectHierarchy {
+    private var byID: [Int: [String: Any]] = [:]
+    private let properties: UserProperties
+    private var cache: [Int: (transform: simd_float4x4, visible: Bool)] = [:]
+
+    init(_ objects: [[String: Any]], properties: UserProperties) {
+        self.properties = properties
+        for o in objects { if let id = (o["id"] as? NSNumber)?.intValue { byID[id] = o } }
+        for id in byID.keys { _ = world(id, depth: 0) }
+    }
+
+    /// World transform and effective visibility of the object's parent chain.
+    func parent(of object: [String: Any]) -> (transform: simd_float4x4, visible: Bool) {
+        guard let id = (object["parent"] as? NSNumber)?.intValue, let w = cache[id] else {
+            return (matrix_identity_float4x4, true)
+        }
+        return w
+    }
+
+    private mutating func world(_ id: Int, depth: Int) -> (transform: simd_float4x4, visible: Bool) {
+        if let w = cache[id] { return w }
+        guard let o = byID[id], depth < 64 else { return (matrix_identity_float4x4, true) }
+        var up = (transform: matrix_identity_float4x4, visible: true)
+        if let p = (o["parent"] as? NSNumber)?.intValue, p != id { up = world(p, depth: depth + 1) }
+        func v3(_ k: String, _ d: Float) -> SIMD3<Float> {
+            let f = parseFloats(properties.resolve(o[k])) ?? [d, d, d]
+            return SIMD3(f[0], f[safe: 1] ?? d, f[safe: 2] ?? d)
+        }
+        let local = translation(v3("origin", 0)) * rotationZ(v3("angles", 0).z) * scaling(v3("scale", 1))
+        let w = (up.transform * local, up.visible && properties.bool(o["visible"]))
+        cache[id] = w
+        return w
     }
 }
 

@@ -197,10 +197,14 @@ public struct ParticleSystemDescription {
     let controlPoints: [ParticleControlPoint]
 
     /// Load a path or inline `particle` definition from a scene object.
-    public init(object: [String: Any], locator: AssetLocator, properties: UserProperties) throws {
+    /// `parent` is the world transform of the object's scene parent; `parentVisible` whether every ancestor is visible.
+    public init(object: [String: Any], locator: AssetLocator, properties: UserProperties,
+                parent: simd_float4x4 = matrix_identity_float4x4, parentVisible: Bool = true) throws {
         var childIndex = 0
+        var object = object
+        if !parentVisible { object["visible"] = false }
         try self.init(object: object, locator: locator, properties: properties, ancestors: [],
-                      parent: matrix_identity_float4x4, inheritedPoints: [], childIndex: &childIndex)
+                      parent: parent, inheritedPoints: [], childIndex: &childIndex)
     }
 
     private init(object: [String: Any], locator: AssetLocator, properties: UserProperties, ancestors: Set<String>,

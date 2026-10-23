@@ -377,12 +377,11 @@ public final class SceneRenderer: WallpaperRenderer {
         // Hidden layers render into their composite FBO instead of the scene, for other layers to read.
         let toScene = layer.visible
         let fbo = (passes.count > 1 || !toScene) ? compositeTargets(index, w, h) : []
-        var origin = layer.origin
+        var model = layer.parentTransform * translation(layer.origin) * rotationZ(layer.angles.z) * scaling(layer.scale)
         if scene.parallax.enabled {
             let d = (layer.parallaxDepth + scene.parallax.amount) * pointer.parallax * scene.canvas.x
-            origin += SIMD3(d.x, d.y, 0)
+            model = translation(SIMD3(d.x, d.y, 0)) * model
         }
-        let model = translation(origin) * rotationZ(layer.angles.z) * scaling(layer.scale)
         effectProjection = Self.effectTextureProjection(projection * model, half: size / 2)
         defer { effectProjection = matrix_identity_float4x4 }
         let plans = try passes.enumerated().map { i, pass -> PassPlan? in
