@@ -1,6 +1,6 @@
 # Workshop subscription sync and safe updates (backend; implementation spec)
 
-Status: spec for implementation (2026-10-23). Background: `docs/design.md` §6.19 (product plan: subscriptions are
+Status: implemented and merged (2026-10-23); results in `docs/design.md` §6.30. Background: `docs/design.md` §6.19 (product plan: subscriptions are
 migrated as a pre-selected list with sizes; updates are staged and compatibility-checked before replacing a working
 version), §6.21–6.24 (WESteam, library, import and download queue). The reviewer writes the UI and app wiring; you
 write the backend. Never touch `Sources/WallpaperApp/` or user-facing text.

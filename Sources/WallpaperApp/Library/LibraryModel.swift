@@ -42,6 +42,11 @@ final class LibraryModel {
     var apply: (WallpaperEntry) -> Void = { _ in }
     /// Set by the app delegate: the current wallpaper's display mode changed.
     var contentModeChanged: (ContentMode) -> Void = { _ in }
+    /// Set by the app delegate: the current wallpaper's property values changed (all values).
+    var propertiesChanged: ([String: String]) -> Void = { _ in }
+    private let propertyStore = (try? PropertyStore()) ?? (try! PropertyStore(url: FileManager.default.temporaryDirectory.appendingPathComponent("mw-properties.json")))
+    private(set) var propertyRevision = 0
+    private var propertyCache: [String: [WallpaperProperty]] = [:]
     /// Display mode per wallpaper folder (only non-default choices are stored).
     private(set) var contentModes: [String: String] = UserDefaults.standard.dictionary(forKey: "contentModes") as? [String: String] ?? [:]
 
@@ -156,6 +161,49 @@ final class LibraryModel {
         guard let id = entry.workshopID,
               let url = URL(string: "https://steamcommunity.com/sharedfiles/filedetails/?id=\(id)") else { return }
         NSWorkspace.shared.open(url)
+    }
+
+    // MARK: - properties
+
+    func properties(for entry: WallpaperEntry) -> [WallpaperProperty] {
+        if let cached = propertyCache[entry.id] { return cached }
+        let url = entry.folder.appendingPathComponent("project.json")
+        let project = (try? JSONSerialization.jsonObject(with: Data(contentsOf: url))) as? [String: Any] ?? [:]
+        let parsed = WallpaperProperties.parse(project: project)
+        propertyCache[entry.id] = parsed
+        return parsed
+    }
+
+    /// Current values: defaults with the user's changes on top.
+    func propertyValues(for entry: WallpaperEntry) -> [String: String] {
+        _ = propertyRevision
+        var values: [String: String] = [:]
+        for p in properties(for: entry) { if let d = p.defaultValue { values[p.id] = d } }
+        return values.merging(propertyStore.values(for: entry.id)) { _, user in user }
+    }
+
+    func setProperty(_ value: String, key: String, for entry: WallpaperEntry) {
+        try? propertyStore.set(value, for: entry.id, key: key)
+        propertyRevision += 1
+        if isCurrent(entry) { propertiesChanged(propertyValues(for: entry)) }
+    }
+
+    func resetProperties(for entry: WallpaperEntry) {
+        try? propertyStore.reset(for: entry.id)
+        propertyRevision += 1
+        if isCurrent(entry) { propertiesChanged(propertyValues(for: entry)) }
+    }
+
+    func hasPropertyChanges(_ entry: WallpaperEntry) -> Bool {
+        _ = propertyRevision
+        return !propertyStore.overrides(for: entry.id, properties: properties(for: entry)).isEmpty
+    }
+
+    /// The user's changes for a wallpaper folder, for loading it.
+    func propertyOverrides(path: String) -> [String: String] {
+        let url = URL(fileURLWithPath: path).standardizedFileURL
+        let entry = entries.first { $0.folder.standardizedFileURL == url } ?? WallpaperEntry(folder: url, root: .userFolder)
+        return propertyStore.overrides(for: entry.id, properties: properties(for: entry))
     }
 
     func contentMode(for entry: WallpaperEntry) -> ContentMode {

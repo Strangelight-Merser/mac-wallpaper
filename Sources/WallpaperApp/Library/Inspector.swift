@@ -49,6 +49,8 @@ struct Inspector: View {
                         DisplayModeSection(model: model, entry: entry)
                     }
 
+                    PropertiesSection(model: model, entry: entry)
+
                     CompatibilitySection(compatibility: entry.compatibility)
 
                     if entry.root == .downloads, let id = entry.workshopID {
@@ -241,5 +243,113 @@ private struct UpdatesSection: View {
                 }
             }
         }
+    }
+}
+
+/// The wallpaper's own settings (project.json properties), applied live to the desktop when it is the current one.
+private struct PropertiesSection: View {
+    let model: LibraryModel
+    let entry: WallpaperEntry
+
+    var body: some View {
+        let all = model.properties(for: entry)
+        if !all.isEmpty {
+            let values = model.propertyValues(for: entry)
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("Settings").font(.headline)
+                    Spacer()
+                    if model.hasPropertyChanges(entry) {
+                        Button { model.resetProperties(for: entry) } label: { Text("Reset to Defaults") }
+                            .buttonStyle(.link).font(.callout)
+                    }
+                }
+                ForEach(all.filter { WallpaperProperties.isVisible($0, values: values) }) { property in
+                    PropertyRow(property: property, value: values[property.id]) { model.setProperty($0, key: property.id, for: entry) }
+                }
+            }
+        }
+    }
+}
+
+private struct PropertyRow: View {
+    let property: WallpaperProperty
+    let value: String?
+    let set: (String) -> Void
+    @State private var text = ""
+
+    var body: some View {
+        let label = PropertyText.label(property.label.isEmpty ? property.id : property.label)
+        switch property.kind {
+        case .group:
+            Text(label.text).font(.subheadline.weight(.semibold)).foregroundStyle(.secondary).padding(.top, 4)
+        case .label:
+            if let link = label.link {
+                Link(destination: link) { Text(label.text) }.font(.callout)
+            } else if !label.text.isEmpty {
+                Text(label.text).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+        case .bool:
+            Toggle(isOn: Binding(get: { value == "true" || value == "1" }, set: { set($0 ? "true" : "false") })) {
+                Text(label.text)
+            }
+            .toggleStyle(.switch).controlSize(.small)
+        case .slider(let min, let max, let step, let precision, let fraction):
+            let number = Double(value ?? "") ?? min
+            let digits = precision ?? (fraction || (step.map { $0 < 1 } ?? (max - min <= 10)) ? 2 : 0)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack {
+                    Text(label.text)
+                    Spacer()
+                    Text(number.formatted(.number.precision(.fractionLength(digits)))).foregroundStyle(.secondary).monospacedDigit()
+                }
+                Group {
+                    if let step, step > 0, step < max - min {
+                        Slider(value: Binding(get: { number }, set: { set(Self.format($0, digits)) }), in: min...Swift.max(min + step, max), step: step)
+                    } else {
+                        Slider(value: Binding(get: { number }, set: { set(Self.format($0, digits)) }), in: min...Swift.max(min + 0.0001, max))
+                    }
+                }
+                .controlSize(.small)
+            }
+        case .color:
+            ColorPicker(selection: Binding(get: { Self.color(value) }, set: { set(Self.string($0)) }), supportsOpacity: false) {
+                Text(label.text)
+            }
+        case .combo(let options):
+            Picker(selection: Binding(get: { value ?? options.first?.value ?? "" }, set: { set($0) })) {
+                ForEach(options, id: \.value) { option in Text(PropertyText.label(option.label).text).tag(option.value) }
+            } label: { Text(label.text) }
+            .pickerStyle(.menu)
+        case .textInput:
+            VStack(alignment: .leading, spacing: 4) {
+                Text(label.text)
+                TextField(text: $text) { Text(label.text) }
+                    .labelsHidden()
+                    .onSubmit { set(text) }
+                    .onAppear { text = value ?? "" }
+                    .onChange(of: value) { text = value ?? "" }
+            }
+        case .file, .directory, .unknown:
+            LabeledContent { Text(value ?? "").foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle) } label: {
+                Text(label.text)
+            }
+        }
+    }
+
+    static func format(_ v: Double, _ digits: Int) -> String {
+        digits == 0 ? String(Int(v.rounded())) : String(format: "%.\(digits)f", v)
+    }
+
+    /// WE colours are "r g b" in 0…1.
+    static func color(_ s: String?) -> Color {
+        let c = (s ?? "").split(separator: " ").compactMap { Double($0) }
+        guard c.count >= 3 else { return .white }
+        return Color(.sRGB, red: c[0], green: c[1], blue: c[2])
+    }
+
+    static func string(_ color: Color) -> String {
+        let ns = NSColor(color).usingColorSpace(.sRGB) ?? .white
+        return [ns.redComponent, ns.greenComponent, ns.blueComponent].map { String(format: "%.5g", Double($0)) }.joined(separator: " ")
     }
 }

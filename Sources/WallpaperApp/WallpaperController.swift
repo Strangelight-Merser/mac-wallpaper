@@ -92,13 +92,18 @@ final class WallpaperController: NSObject, MTKViewDelegate {
     // MARK: - loading
 
     /// Load a wallpaper off the main thread (shader compilation takes seconds), then start drawing.
-    func load(wallpaper: URL, assets: URL?) {
+    /// The current wallpaper's folder and project.json (for web property updates).
+    private var current: (folder: URL, project: [String: Any])?
+
+    func load(wallpaper: URL, assets: URL?, properties: [String: String] = [:]) {
+        current = (wallpaper, (try? JSONSerialization.jsonObject(with: Data(contentsOf: wallpaper.appendingPathComponent("project.json")))) as? [String: Any] ?? [:])
+        lastLoad = (wallpaper, assets, properties)
         setPaused(.loading, true)
         loadError = nil
         let started = CACurrentMediaTime()
         DispatchQueue.global(qos: .userInitiated).async {
             do {
-                let r = try Wallpaper.open(project: wallpaper, assets: assets)
+                let r = try Wallpaper.open(project: wallpaper, assets: assets, properties: properties)
                 // Hidden default for A/B measurements: `-disableLayerCache YES`.
                 (r as? SceneRenderer)?.disableLayerCache = UserDefaults.standard.bool(forKey: "disableLayerCache")
                 // Before the warm-up frame: scripts may start sounds from init(). Nothing plays until active.
@@ -137,6 +142,24 @@ final class WallpaperController: NSObject, MTKViewDelegate {
                     self.onStateChange?()
                 }
             }
+        }
+    }
+
+    private var lastLoad: (wallpaper: URL, assets: URL?, properties: [String: String])?
+
+    /// The user changed the current wallpaper's properties (all values, not only the changed ones):
+    /// applied live where possible, otherwise the wallpaper reloads with them.
+    func applyProperties(_ values: [String: String]) {
+        if let renderer {
+            if !renderer.setUserProperties(values), let last = lastLoad {
+                load(wallpaper: last.wallpaper, assets: last.assets, properties: values)
+            } else {
+                lastLoad?.properties = values
+            }
+        } else if webRequest != nil, let project = current?.project {
+            let page = Wallpaper.webProperties(project: project, values: values)
+            webViews.values.forEach { $0.setUserProperties(page) }
+            lastLoad?.properties = values
         }
     }
 

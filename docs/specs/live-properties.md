@@ -1,6 +1,6 @@
 # Wallpaper properties: model, storage and live updates (backend; implementation spec)
 
-Status: spec for implementation (2026-10-23). Background: `docs/design.md` §6.19 (product plan), §6.26–6.29.
+Status: implemented and merged (2026-10-23); results in `docs/design.md` §6.30. Background: `docs/design.md` §6.19 (product plan), §6.26–6.29.
 The reviewer writes the properties panel UI; you write everything below it. Never touch
 `Sources/WallpaperApp/` or user-facing text.
 

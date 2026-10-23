@@ -23,6 +23,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self?.loadCurrent()
         }
         model.contentModeChanged = { [weak self] mode in self?.controller.contentMode = mode }
+        model.propertiesChanged = { [weak self] values in self?.controller.applyProperties(values) }
         return model
     }()
     lazy var steamModel: SteamModel = {
@@ -86,7 +87,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         controller.contentMode = LibraryModel.storedContentMode(path: path)
         controller.load(wallpaper: URL(fileURLWithPath: path),
-                        assets: AssetsModel.currentLocation)
+                        assets: AssetsModel.currentLocation, properties: libraryModel.propertyOverrides(path: path))
         libraryModel.currentPath = path
         log("loading \(path)")
         refreshMenu()

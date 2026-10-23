@@ -1,6 +1,6 @@
 # WE assets in the app: status, download, updates (backend; implementation spec)
 
-Status: spec for implementation (2026-10-23). Background: `docs/design.md` §6.25 (WE assets download, verified live:
+Status: implemented and merged (2026-10-23); results in `docs/design.md` §6.30. Background: `docs/design.md` §6.25 (WE assets download, verified live:
 2,935 files, 38.2 MB download, 79.5 MB on disk; zstd chunks), `docs/specs/steam-assets.md`. The reviewer writes the
 onboarding UI and app flow; you write the backend. Never touch `Sources/WallpaperApp/` or user-facing text.
 
