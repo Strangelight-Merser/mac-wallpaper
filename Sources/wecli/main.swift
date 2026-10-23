@@ -882,14 +882,15 @@ func workshopCommand(_ arguments: [String]) async throws {
         throw SteamError.malformed(help)
     }
     guard let tokens = try SteamKeychain.load() else { throw SteamError.malformed("not logged in; run steam login") }
-    let client = SteamCMClient(machineName: "mac-wallpaper on " + ProcessInfo.processInfo.hostName)
+    var client = SteamCMClient(machineName: "mac-wallpaper on " + ProcessInfo.processInfo.hostName)
     func json<T: Encodable>(_ value: T) throws {
         let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]; encoder.dateEncodingStrategy = .iso8601
         print(String(decoding: try encoder.encode(value), as: UTF8.self))
     }
     do {
         try await client.connect()
-        let session = try await client.logOn(tokens), browser = WorkshopBrowser(client: client)
+        var session = try await client.logOn(tokens)
+        let browser = WorkshopBrowser(client: client)
         if mutation {
             let id = UInt64(ids[0])!
             if command == "subscribe" { try await browser.subscribe(id) } else { try await browser.unsubscribe(id) }
@@ -913,10 +914,31 @@ func workshopCommand(_ arguments: [String]) async throws {
                 guard !fresh.isEmpty, let next = page.nextCursor, seen.count < page.total else { break }
                 cursor = next
             }
-            let downloader = WorkshopDownloader(client: client, session: session)
+            var downloader = WorkshopDownloader(client: client, session: session)
             var plans: [DownloadPlan] = [], records: [WorkshopSurvey.Record] = []
+            /// Steam drops the CM session after a burst of manifest requests: log on again and retry.
+            func plan(_ item: WorkshopItem) async throws -> DownloadPlan {
+                var attempt = 1
+                while true {
+                    do { return try await downloader.plan(item) }
+                    catch where attempt < 4 && { switch $0 { case SteamError.disconnected, SteamError.timeout, SteamError.transport: true
+                                                             case SteamError.result(let n): [5, 20, 34, 48].contains(n)
+                                                             default: false } }(error) {
+                        attempt += 1
+                        FileHandle.standardError.write(Data("Steam session lost (\(error)); reconnecting…\n".utf8))
+                        await client.disconnect()
+                        try await Task.sleep(for: .seconds(Double(attempt * 2)))
+                        client = SteamCMClient(machineName: "mac-wallpaper on " + ProcessInfo.processInfo.hostName)
+                        try await client.connect()
+                        session = try await client.logOn(tokens)
+                        downloader = WorkshopDownloader(client: client, session: session)
+                    }
+                }
+            }
             for item in items {
-                do { plans.append(try await downloader.plan(item)) }
+                // Gentle pacing: bursts of manifest requests are what gets the session dropped.
+                try await Task.sleep(for: .milliseconds(300))
+                do { plans.append(try await plan(item)) }
                 catch {
                     if error is CancellationError { throw error }
                     records.append(.init(item: item, files: [], assessment: WorkshopSurvey.classify(names: []), error: String(describing: error)))

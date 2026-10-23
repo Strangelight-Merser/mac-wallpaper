@@ -135,9 +135,11 @@ extension WorkshopItem.Kind {
         }
     }
     var label: String { self == .preset ? String(localized: "Preset") : wallpaperType.label }
+    var symbol: String { wallpaperType.symbol }
 }
 
 extension WorkshopItem.Rating {
+    var label: String { wallpaperRating.label }
     var wallpaperRating: ContentRating {
         switch self {
         case .everyone: .everyone

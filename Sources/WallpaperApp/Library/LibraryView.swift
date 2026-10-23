@@ -7,6 +7,7 @@ struct LibraryView: View {
     @Bindable var steam: SteamModel
     @Bindable var assets: AssetsModel
     @Bindable var setup: SetupModel
+    let browse: WorkshopBrowseModel
     @State private var downloadsShown = false
 
     var body: some View {
@@ -14,11 +15,19 @@ struct LibraryView: View {
             Sidebar(model: model, steam: steam)
                 .navigationSplitViewColumnWidth(min: 180, ideal: 210, max: 280)
         } detail: {
-            WallpaperGrid(model: model)
-                .inspector(isPresented: $model.inspectorShown) {
-                    Inspector(model: model, steam: steam)
-                        .inspectorColumnWidth(min: 260, ideal: 300, max: 380)
-                }
+            if model.section == .workshopBrowse {
+                WorkshopBrowseView(browse: browse)
+                    .inspector(isPresented: $model.inspectorShown) {
+                        WorkshopInspector(browse: browse)
+                            .inspectorColumnWidth(min: 260, ideal: 300, max: 380)
+                    }
+            } else {
+                WallpaperGrid(model: model)
+                    .inspector(isPresented: $model.inspectorShown) {
+                        Inspector(model: model, steam: steam)
+                            .inspectorColumnWidth(min: 260, ideal: 300, max: 380)
+                    }
+            }
         }
         .searchable(text: $model.search, placement: .toolbar, prompt: Text("Search titles and tags"))
         .sheet(isPresented: $steam.loginSheetShown) { SteamLoginSheet(steam: steam) }
@@ -105,6 +114,8 @@ private struct Sidebar: View {
                         .buttonStyle(.plain)
                         .help(Text("New versions are checked before they replace the installed ones."))
                     }
+                    Label { Text("Browse the Workshop") } icon: { Image(systemName: "sparkle.magnifyingglass") }
+                        .tag(LibrarySection.workshopBrowse)
                     if steam.newSubscriptionCount > 0 {
                         Button { steam.showImport() } label: {
                             Label { Text("\(steam.newSubscriptionCount) New Subscriptions…") } icon: { Image(systemName: "plus.circle") }

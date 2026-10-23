@@ -45,7 +45,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return assets
     }()
     let setupModel = SetupModel()
-    lazy var libraryWindow = LibraryWindowController(model: libraryModel, steam: steamModel, assets: assetsModel, setup: setupModel)
+    lazy var browseModel = WorkshopBrowseModel(steam: steamModel, library: libraryModel)
+    lazy var libraryWindow = LibraryWindowController(model: libraryModel, steam: steamModel, assets: assetsModel, setup: setupModel,
+                                                     browse: browseModel)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         applyCommandLine()

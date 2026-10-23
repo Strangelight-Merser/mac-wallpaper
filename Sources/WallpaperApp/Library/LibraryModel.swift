@@ -8,6 +8,8 @@ enum LibrarySection: Hashable {
     case all
     case type(WallpaperType)
     case steamWorkshop
+    /// Browsing the Steam Workshop (not the local library).
+    case workshopBrowse
     case downloads
     case folder(URL)
 }
@@ -96,6 +98,7 @@ final class LibraryModel {
             case .steamWorkshop: guard e.root == .steamWorkshop else { return false }
             case .downloads: guard e.root == .downloads else { return false }
             case .folder(let url): guard e.folder.path.hasPrefix(url.path + "/") else { return false }
+            case .workshopBrowse: return false
             }
             if !showMature && e.contentRating != .everyone { return false }
             if onlyRunnable, e.compatibility?.status == .unsupported { return false }

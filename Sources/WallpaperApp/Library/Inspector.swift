@@ -135,7 +135,7 @@ private struct CompatibilitySection: View {
 }
 
 /// Wrapping row of tag capsules.
-private struct TagList: View {
+struct TagList: View {
     let tags: [String]
 
     var body: some View {
