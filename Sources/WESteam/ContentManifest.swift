@@ -103,6 +103,19 @@ public struct ContentManifest: Sendable, Equatable {
         }
         self.files = files
     }
+    init(depotID: UInt32, manifestID: UInt64, files: [File]) {
+        self.depotID = depotID; self.manifestID = manifestID; self.files = files
+    }
+    func assetsOnly() throws -> ContentManifest {
+        let assets = try files.compactMap { file -> File? in
+            let path = file.path.replacingOccurrences(of: "\\", with: "/")
+            guard path.lowercased().hasPrefix("assets/") else { return nil }
+            return File(path: try Self.normalizedPath(String(path.dropFirst(7))), size: file.size,
+                        flags: file.flags, shaFilename: file.shaFilename, shaContent: file.shaContent,
+                        chunks: file.chunks, linkTarget: file.linkTarget)
+        }
+        return ContentManifest(depotID: depotID, manifestID: manifestID, files: assets)
+    }
     static func normalizedPath(_ name: String) throws -> String {
         let path = name.replacingOccurrences(of: "\\", with: "/")
         let parts = path.split(separator: "/", omittingEmptySubsequences: false)

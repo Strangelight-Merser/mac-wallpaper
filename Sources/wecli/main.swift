@@ -17,7 +17,7 @@ func usage() -> Never {
     print("""
     usage:
       wecli library scan|show [--root <dir>] [--steam] [--downloads] [--assets <dir>] [--deep] [--json] [--index <file>]
-      wecli steam login|whoami|logout|details|subs|download
+      wecli steam login|whoami|logout|details|subs|download|assets
       wecli texinfo <file.tex>...
       wecli tex2png <file.tex> <out.png>
       wecli verify  <dir>            decode every .tex and compare with sibling .png
@@ -485,6 +485,7 @@ func steamUsage() -> Never {
     wecli steam details <id>...
     wecli steam subs [--json]
     wecli steam download <id> --out <dir> [--max-mb N] [--yes]
+    wecli steam assets --out <dir> [--max-mb N] [--yes] [--plan]
     """)
     exit(2)
 }
@@ -540,6 +541,7 @@ func steamCommand(_ arguments: [String]) async throws {
     let allowedFlags: Set<String>
     switch command {
     case "login": allowedOptions = ["--password", "--qr-out"]; allowedFlags = []
+    case "assets": allowedOptions = ["--out", "--max-mb"]; allowedFlags = ["--yes", "--plan"]
     case "download": allowedOptions = ["--out", "--max-mb"]; allowedFlags = ["--yes"]
     case "subs": allowedOptions = []; allowedFlags = ["--json"]
     case "whoami", "logout", "details": allowedOptions = []; allowedFlags = []
@@ -618,9 +620,11 @@ func steamCommand(_ arguments: [String]) async throws {
         let ids = positional.compactMap(UInt64.init)
         guard !ids.isEmpty, ids.count == positional.count else { steamUsage() }
         show(try await SteamWorkshop().details(ids))
-    case "subs", "download":
+    case "subs", "download", "assets":
         if command == "subs" {
             guard positional.isEmpty else { steamUsage() }
+        } else if command == "assets" {
+            guard positional.isEmpty, options["--out"] != nil else { steamUsage() }
         } else {
             guard positional.count == 1, UInt64(positional[0]) != nil, options["--out"] != nil else { steamUsage() }
         }
@@ -643,6 +647,19 @@ func steamCommand(_ arguments: [String]) async throws {
                     let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]; encoder.dateEncodingStrategy = .iso8601
                     print(String(decoding: try encoder.encode(Output(source: subs.source, items: items)), as: UTF8.self))
                 } else { print("Subscriptions via \(subs.source.rawValue)"); show(items) }
+            } else if command == "assets" {
+                let downloader = WEAssetsDownloader(client: client, session: session)
+                let plan = try await downloader.plan()
+                for depot in plan.depots { print("Depot: \(depot.depotID); manifest: \(depot.manifestID)") }
+                print("Build: \(plan.buildID); files: \(plan.files); download: \(plan.networkBytes) bytes; disk: \(plan.diskBytes) bytes")
+                if !flags.contains("--plan") {
+                    let limit = flags.contains("--yes") ? Int64.max : Int64(limitMB * 1048576)
+                    let result = try await downloader.download(plan, to: URL(fileURLWithPath: options["--out"]!), maxBytes: limit) { progress in
+                        print("\(progress.networkBytesDone)/\(progress.networkBytesTotal) bytes; \(progress.filesDone)/\(progress.filesTotal) files")
+                    }
+                    for warning in result.warnings { print("Warning: \(warning)") }
+                    print("Downloaded \(result.files) files to \(result.destination.path)")
+                }
             } else {
                 guard let item = try await SteamWorkshop().details([UInt64(positional[0])!]).first else {
                     throw SteamError.malformed("workshop item missing")
