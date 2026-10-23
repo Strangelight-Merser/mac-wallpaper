@@ -44,6 +44,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc func showLibrary() { libraryWindow.show() }
 
+    /// Opening the app again (Finder, Launchpad, Spotlight) shows the library: the menu-bar icon can be
+    /// hidden behind the notch or other icons, and there is no Dock icon.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        showLibrary()
+        return true
+    }
+
     func applyCommandLine() {
         let args = CommandLine.arguments
         for (flag, key) in [("--wallpaper", "wallpaper"), ("--assets", "assets")] {

@@ -38,9 +38,51 @@ extension SceneRenderer {
         let mouse = projection.inverse * SIMD4(pointer.position.x * 2 - 1, 1 - pointer.position.y * 2, 0, 1)
         let dt = max(0, Double(time) - (lastScriptTime ?? Double(time)))
         lastScriptTime = Double(time)
-        scriptEngine?.update(frameTime: dt, runtime: Double(time), date: scriptClock ?? Date(),
-                             cursorWorld: SIMD3(Double(mouse.x), Double(mouse.y), 0))
+        let world = SIMD3(Double(mouse.x), Double(mouse.y), 0)
+        dispatchCursorEvents(world: SIMD2(mouse.x, mouse.y))
+        scriptEngine?.update(frameTime: dt, runtime: Double(time), date: scriptClock ?? Date(), cursorWorld: world)
         worldCache = [:]
+    }
+
+    /// The topmost visible layer under a scene point (by its quad; full-screen composition layers are
+    /// skipped, they would cover everything).
+    func layerID(at point: SIMD2<Float>) -> Int? {
+        for object in renderOrder.reversed() {
+            guard case .image(let i) = object else { continue }
+            let layer = scene.layers[i]
+            guard !layer.fullscreen, !layer.passthrough, isVisible(layer.id) else { continue }
+            let size = layerSizes[i]
+            guard size.x > 0, size.y > 0 else { continue }
+            let local = layerModel(i).inverse * SIMD4(point.x, point.y, 0, 1)
+            if abs(local.x) <= size.x / 2, abs(local.y) <= size.y / 2 { return layer.id }
+        }
+        return nil
+    }
+
+    /// Turns the polled pointer into SceneScript cursor events for the layer under the cursor:
+    /// down/up on button changes, click when released over the layer it went down on, move,
+    /// and enter/leave when the layer under the cursor changes.
+    private func dispatchCursorEvents(world point: SIMD2<Float>) {
+        guard let engine = scriptEngine else { return }
+        let down = pointer.state.x > 0
+        let hit = layerID(at: point)
+        let world = SIMD3(Double(point.x), Double(point.y), 0)
+        if hit != cursor.hover {
+            if let old = cursor.hover { engine.cursorEvent(.leave, object: old, world: world) }
+            if let hit { engine.cursorEvent(.enter, object: hit, world: world) }
+            cursor.hover = hit
+        }
+        if point != cursor.last, let hit { engine.cursorEvent(.move, object: hit, world: world) }
+        cursor.last = point
+        if down, !cursor.down {
+            cursor.pressed = hit
+            if let hit { engine.cursorEvent(.down, object: hit, world: world) }
+        } else if !down, cursor.down {
+            if let hit { engine.cursorEvent(.up, object: hit, world: world) }
+            if let hit, hit == cursor.pressed { engine.cursorEvent(.click, object: hit, world: world) }
+            cursor.pressed = nil
+        }
+        cursor.down = down
     }
 
     private func startScripts() {

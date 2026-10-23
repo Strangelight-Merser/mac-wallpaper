@@ -59,7 +59,9 @@ final class ShaderCompatTests: XCTestCase {
         """
         let declared = ShaderPreprocessor.scan(v).combos.merging(ShaderPreprocessor.scan(f).combos) { a, _ in a }
         let vs = try preprocess(v, .vertex, overrides: declared), fs = try preprocess(f, .fragment, overrides: declared)
-        XCTAssertThrowsError(try ShaderCompiler.compile(vertex: vs, fragment: fs))
+        // The CRLF vertex shader's [COMBO] is read now, so both stages agree without a repair; the
+        // repair path must still produce a working pair.
+        XCTAssertNoThrow(try ShaderCompiler.compile(vertex: vs, fragment: fs))
         let pair = repaired(vs, fs)
         XCTAssertTrue(pair.1.contains("#define SAMPLES 1\n"))
         XCTAssertNoThrow(try ShaderCompiler.compile(vertex: pair.0, fragment: pair.1))

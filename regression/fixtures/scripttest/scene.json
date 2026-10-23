@@ -155,6 +155,21 @@
    "scale": "0.5 0.5 1",
    "color": "0.8 0.8 0.8",
    "visible": true
+  },
+  {
+   "id": 9,
+   "name": "button",
+   "text": {
+    "script": "'use strict';\nexport function cursorEnter(e) { shared.hovered = true; }\nexport function cursorDown(e) { shared.pressed = Math.round(e.worldPosition.x) + ',' + Math.round(e.worldPosition.y); }\nexport function update(value) { return shared.pressed ? 'pressed at ' + shared.pressed : (shared.hovered ? 'hovered' : 'click me'); }\n",
+    "value": "click me"
+   },
+   "font": "fonts/NotoSans-Regular.ttf",
+   "pointsize": 12,
+   "padding": 16,
+   "origin": "850 300 0",
+   "scale": "0.5 0.5 1",
+   "color": "1 0.9 0.5",
+   "visible": true
   }
  ]
 }

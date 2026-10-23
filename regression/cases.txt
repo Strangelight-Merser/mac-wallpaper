@@ -174,3 +174,5 @@ fixture/scripttest.t0               regression/fixtures/scripttest              
 fixture/scripttest.t3               regression/fixtures/scripttest                       --time 3 --size 1024x512
 fixture/scripttest.frames           regression/fixtures/scripttest                       --time 2 --frames 60 --size 1024x512
 fixture/scripttest.props            regression/fixtures/scripttest                       --time 3 --size 1024x512 --prop showseconds=false
+fixture/scripttest.hover            regression/fixtures/scripttest                       --time 1 --size 1024x512 --pointer 0.83,0.414
+fixture/scripttest.press            regression/fixtures/scripttest                       --time 1 --size 1024x512 --pointer 0.83,0.414 --press 1

@@ -35,6 +35,8 @@ public final class SceneRenderer: WallpaperRenderer {
     var worldCache: [Int: simd_float4x4] = [:]
     /// Per layer: effects currently hidden by scripts (initially `ImageLayer.hiddenEffects`).
     var hiddenEffects: [Int: Set<Int>] = [:]
+    /// Cursor state behind SceneScript cursor events (see `dispatchCursorEvents`).
+    var cursor: (down: Bool, pressed: Int?, hover: Int?, last: SIMD2<Float>?) = (false, nil, nil, nil)
     /// Layers whose uniform templates scripts changed since their last draw.
     var uniformsDirty = Set<Int>()
     /// Sound objects play only after `enableSound` (the app); offline renders stay silent.
@@ -200,6 +202,9 @@ public final class SceneRenderer: WallpaperRenderer {
 
         let projection = coverProjection(output: outputSize)
         worldCache = [:]
+        // Text boxes are laid out before scripts (cursor hit tests need their size) and again after
+        // (scripts may change the text); unchanged text is not laid out twice.
+        updateTextLayers()
         runScripts(projection: projection)
         updateTextLayers()
         let c = scene.clearColor
@@ -406,6 +411,23 @@ public final class SceneRenderer: WallpaperRenderer {
         return layer.size
     }
 
+    /// Object → scene transform of a layer's quad (centred, `layerSizes` in object units).
+    func layerModel(_ index: Int) -> simd_float4x4 {
+        let layer = scene.layers[index]
+        var model: simd_float4x4
+        if let node = scene.nodes[layer.id], !layer.fullscreen {
+            model = parentTransform(layer.id) * translation(node.origin) * rotationZ(node.angles.z) * scaling(node.scale)
+        } else {
+            model = translation(layer.origin) * rotationZ(layer.angles.z) * scaling(layer.scale)
+        }
+        model *= translation(textOffset(index))
+        if scene.parallax.enabled {
+            let d = (layer.parallaxDepth + scene.parallax.amount) * pointer.parallax * scene.canvas.x
+            model = translation(SIMD3(d.x, d.y, 0)) * model
+        }
+        return model
+    }
+
     func renderLayer(_ index: Int, projection: simd_float4x4) throws {
         let layer = scene.layers[index]
         // Passes of effects hidden by scripts are skipped; plan keys keep the pass's original index.
@@ -425,17 +447,7 @@ public final class SceneRenderer: WallpaperRenderer {
         // Hidden layers render into their composite FBO instead of the scene, for other layers to read.
         let toScene = layer.fullscreen || scene.nodes[layer.id] == nil ? layer.visible : isVisible(layer.id)
         let fbo = (passes.count > 1 || !toScene) ? compositeTargets(index, w, h) : []
-        var model: simd_float4x4
-        if let node = scene.nodes[layer.id], !layer.fullscreen {
-            model = parentTransform(layer.id) * translation(node.origin) * rotationZ(node.angles.z) * scaling(node.scale)
-        } else {
-            model = translation(layer.origin) * rotationZ(layer.angles.z) * scaling(layer.scale)
-        }
-        model *= translation(textOffset(index))
-        if scene.parallax.enabled {
-            let d = (layer.parallaxDepth + scene.parallax.amount) * pointer.parallax * scene.canvas.x
-            model = translation(SIMD3(d.x, d.y, 0)) * model
-        }
+        let model = layerModel(index)
         effectProjection = Self.effectTextureProjection(projection * model, half: size / 2)
         defer { effectProjection = matrix_identity_float4x4 }
         let refresh = uniformsDirty.remove(index) != nil
