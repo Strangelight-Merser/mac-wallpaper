@@ -5,6 +5,7 @@ let package = Package(
     name: "MacWallpaper",
     platforms: [.macOS(.v14)],
     products: [
+        .library(name: "WEScript", targets: ["WEScript"]),
         .library(name: "WEFormat", targets: ["WEFormat"]),
         .library(name: "WELibrary", targets: ["WELibrary"]),
         .library(name: "WESteam", targets: ["WESteam"]),
@@ -12,6 +13,8 @@ let package = Package(
         .executable(name: "WallpaperApp", targets: ["WallpaperApp"]),
     ],
     targets: [
+        .target(name: "WEScript", resources: [.process("Runtime.js")], linkerSettings: [.linkedFramework("JavaScriptCore")]),
+        .testTarget(name: "WEScriptTests", dependencies: ["WEScript"]),
         .target(name: "WEFormat"),
         .target(name: "WELibrary", dependencies: ["WEFormat", "WERender", "WEVideo"]),
         .testTarget(name: "WELibraryTests", dependencies: ["WELibrary", "WEFormat", "WEShader", "WERender"]),
