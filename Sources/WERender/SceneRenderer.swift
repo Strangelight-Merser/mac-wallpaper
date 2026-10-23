@@ -36,7 +36,7 @@ public final class SceneRenderer: WallpaperRenderer {
     /// Per layer: effects currently hidden by scripts (initially `ImageLayer.hiddenEffects`).
     var hiddenEffects: [Int: Set<Int>] = [:]
     /// Cursor state behind SceneScript cursor events (see `dispatchCursorEvents`).
-    var cursor: (down: Bool, pressed: Int?, hover: Int?, last: SIMD2<Float>?) = (false, nil, nil, nil)
+    var cursor: (down: Bool, pressed: [Int], hover: [Int], last: SIMD2<Float>?) = (false, [], [], nil)
     /// Layers whose uniform templates scripts changed since their last draw.
     var uniformsDirty = Set<Int>()
     /// Sound objects play only after `enableSound` (the app); offline renders stay silent.

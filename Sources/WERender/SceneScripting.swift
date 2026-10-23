@@ -44,9 +44,11 @@ extension SceneRenderer {
         worldCache = [:]
     }
 
-    /// The topmost visible layer under a scene point (by its quad; full-screen composition layers are
-    /// skipped, they would cover everything).
-    func layerID(at point: SIMD2<Float>) -> Int? {
+    /// Visible layers under a scene point, topmost first (by their quads; full-screen composition layers
+    /// are skipped, they would cover everything). Transparent layers count: wallpapers use alpha-0 shapes
+    /// as hover areas.
+    func layerIDs(at point: SIMD2<Float>) -> [Int] {
+        var hits: [Int] = []
         for object in renderOrder.reversed() {
             guard case .image(let i) = object else { continue }
             let layer = scene.layers[i]
@@ -54,33 +56,32 @@ extension SceneRenderer {
             let size = layerSizes[i]
             guard size.x > 0, size.y > 0 else { continue }
             let local = layerModel(i).inverse * SIMD4(point.x, point.y, 0, 1)
-            if abs(local.x) <= size.x / 2, abs(local.y) <= size.y / 2 { return layer.id }
+            if abs(local.x) <= size.x / 2, abs(local.y) <= size.y / 2 { hits.append(layer.id) }
         }
-        return nil
+        return hits
     }
 
-    /// Turns the polled pointer into SceneScript cursor events for the layer under the cursor:
-    /// down/up on button changes, click when released over the layer it went down on, move,
-    /// and enter/leave when the layer under the cursor changes.
+    /// Turns the polled pointer into SceneScript cursor events. Like WE, every layer under the cursor gets
+    /// them, not only the topmost (a music player stacks a transparent hover shape, a highlight and the
+    /// clickable title): down/up on button changes, click when released over a layer it went down on,
+    /// move, and enter/leave as layers come under or leave the cursor.
     private func dispatchCursorEvents(world point: SIMD2<Float>) {
         guard let engine = scriptEngine else { return }
         let down = pointer.state.x > 0
-        let hit = layerID(at: point)
+        let hits = layerIDs(at: point)
         let world = SIMD3(Double(point.x), Double(point.y), 0)
-        if hit != cursor.hover {
-            if let old = cursor.hover { engine.cursorEvent(.leave, object: old, world: world) }
-            if let hit { engine.cursorEvent(.enter, object: hit, world: world) }
-            cursor.hover = hit
-        }
-        if point != cursor.last, let hit { engine.cursorEvent(.move, object: hit, world: world) }
+        for id in cursor.hover where !hits.contains(id) { engine.cursorEvent(.leave, object: id, world: world) }
+        for id in hits where !cursor.hover.contains(id) { engine.cursorEvent(.enter, object: id, world: world) }
+        cursor.hover = hits
+        if point != cursor.last { for id in hits { engine.cursorEvent(.move, object: id, world: world) } }
         cursor.last = point
         if down, !cursor.down {
-            cursor.pressed = hit
-            if let hit { engine.cursorEvent(.down, object: hit, world: world) }
+            cursor.pressed = hits
+            for id in hits { engine.cursorEvent(.down, object: id, world: world) }
         } else if !down, cursor.down {
-            if let hit { engine.cursorEvent(.up, object: hit, world: world) }
-            if let hit, hit == cursor.pressed { engine.cursorEvent(.click, object: hit, world: world) }
-            cursor.pressed = nil
+            for id in hits { engine.cursorEvent(.up, object: id, world: world) }
+            for id in hits where cursor.pressed.contains(id) { engine.cursorEvent(.click, object: id, world: world) }
+            cursor.pressed = []
         }
         cursor.down = down
     }

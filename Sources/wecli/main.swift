@@ -25,7 +25,7 @@ func usage() -> Never {
       wecli pkg     <scene.pkg> [outdir]
       wecli scene   <wallpaper dir> [--assets <dir>]   dump layers / passes / effect FBOs
       wecli compare <a.png> <b.png> [--tolerance N] [--diff out.png]   exit 0 = match, 1 = differ
-      wecli sound   <wallpaper dir> --assets <dir> [--seconds N]   mix sound objects offline, print levels
+      wecli sound   <wallpaper dir> --assets <dir> [--seconds N] [--click x,y[@s]]   mix sound objects offline, print levels
       wecli bench   <wallpaper dir> --assets <dir> [--size WxH] [--frames N] [--cache off] [--layers a,b] [--bloom off] [--fps N]
       wecli render  <wallpaper dir> --assets <WE assets dir> [--time t] [--size WxH] [--prop name=value]...
                     [--layers a,b] [--bloom off] [--cache off] [--warm t] [--target _rt_name] --out <out.png>
@@ -437,8 +437,21 @@ case "sound":
         print("\(s.id) \(s.name): \(s.mode.rawValue), volume \(s.volume)\(s.startSilent ? ", starts silent" : ""), \(s.files.count) file(s)")
     }
     player.setActive(true)
+    // --click x,y[@s]: press and release the mouse there (0…1, y down) at second s (default 1).
+    let click = opts["--click"].map { spec -> (SIMD2<Float>, Int) in
+        let parts = spec.split(separator: "@")
+        let xy = parts[0].split(separator: ",").compactMap { Float($0) }
+        return (SIMD2(xy[0], xy[1]), parts.count > 1 ? Int(parts[1]) ?? 1 : 1)
+    }
     for second in 0..<seconds {
         // Run scripts once a second (they may start or stop sounds), then mix the second in 0.1 s chunks.
+        if let (at, when) = click, second == when {
+            renderer.pointer.position = at
+            renderer.pointer.state = SIMD4(1, 0, 1, 0)
+            _ = try renderer.render(width: 16, height: 16, time: Float(second) - 0.1)
+            renderer.pointer.state = .zero
+            print("    click at \(at.x),\(at.y)")
+        }
         _ = try renderer.render(width: 16, height: 16, time: Float(second))
         var sum: Double = 0, peak: Float = 0, count = 0
         for _ in 0..<10 {
