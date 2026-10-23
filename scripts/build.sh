@@ -1,6 +1,8 @@
 #!/bin/zsh
 # Release build with SwiftPM (needs Xcode 26.3+, selected via xcode-select), then wrap the app
-# executable into MacWallpaper.app (menu-bar app: LSUIElement, ad-hoc signed).
+# executable into MacWallpaper.app (menu-bar app: LSUIElement). Signed with the "mac-wallpaper development"
+# identity if scripts/setup-signing.sh has set it up (stable across builds, so Keychain access is
+# remembered), otherwise ad-hoc.
 set -euo pipefail
 cd "${0:A:h}/.."
 swift build -c release
@@ -27,5 +29,10 @@ cat > $APP/Contents/Info.plist <<PLIST
   <key>NSHighResolutionCapable</key><true/>
 </dict></plist>
 PLIST
-codesign --force --sign - $APP >/dev/null 2>&1 || true
+IDENTITY="mac-wallpaper development"
+if security find-identity -v -p codesigning | grep -q "\"$IDENTITY\""; then
+  codesign --force --sign "$IDENTITY" $APP
+else
+  codesign --force --sign - $APP >/dev/null 2>&1 || true
+fi
 echo "built $BIN/wecli and $APP"
