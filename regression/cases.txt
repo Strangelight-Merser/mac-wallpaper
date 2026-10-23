@@ -197,3 +197,7 @@ fixture/videotexturetest.loop        regression/fixtures/videotexturetest       
 fixture/particletest2.t1            regression/fixtures/particletest2                    --time 1 --size 1024x512
 fixture/particletest2.t3            regression/fixtures/particletest2                    --time 3 --size 1024x512
 fixture/particletest2.frames        regression/fixtures/particletest2                    --time 1 --frames 90 --size 1024x512
+
+properties/default regression/fixtures/propertiestest --time 1 --size 512x256
+properties/overrides regression/fixtures/propertiestest --time 1 --size 512x256 --prop mode=1 --prop opacity=0.5 --prop caption=Changed --prop strength=0.8
+properties/live regression/fixtures/propertiestest --time 1 --size 512x256 --live-prop mode=1 --live-prop opacity=0.5 --live-prop caption=Changed --live-prop strength=0.8

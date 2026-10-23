@@ -1,0 +1,84 @@
+{
+  "type": "scene",
+  "file": "scene.json",
+  "general": {
+    "properties": {
+      "shown": {
+        "type": "bool",
+        "value": true
+      },
+      "opacity": {
+        "type": "slider",
+        "min": 0,
+        "max": 1,
+        "value": 1
+      },
+      "tint": {
+        "type": "color",
+        "value": "1 1 1"
+      },
+      "mode": {
+        "type": "combo",
+        "value": 0,
+        "options": [
+          {
+            "label": "Off",
+            "value": 0
+          },
+          {
+            "label": "On",
+            "value": 1
+          }
+        ]
+      },
+      "caption": {
+        "type": "textinput",
+        "value": "Properties"
+      },
+      "section": {
+        "type": "group",
+        "text": "Controls"
+      },
+      "label": {
+        "type": "Text",
+        "text": "Preview"
+      },
+      "background": {
+        "type": "color",
+        "value": "0.05 0.08 0.1"
+      },
+      "strength": {
+        "type": "slider",
+        "value": 0.4
+      },
+      "bloom": {
+        "type": "bool",
+        "value": false
+      },
+      "position": {
+        "type": "textinput",
+        "value": "180 150 0"
+      },
+      "scale": {
+        "type": "textinput",
+        "value": "1 1 1"
+      },
+      "angles": {
+        "type": "textinput",
+        "value": "0 0 0"
+      },
+      "file": {
+        "type": "file",
+        "value": "models/clouds.json"
+      },
+      "directory": {
+        "type": "directory",
+        "value": "materials"
+      },
+      "unknown": {
+        "type": "future",
+        "value": "x"
+      }
+    }
+  }
+}

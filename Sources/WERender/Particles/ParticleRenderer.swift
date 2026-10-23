@@ -69,6 +69,19 @@ final class ParticleRenderState {
 }
 
 extension SceneRenderer {
+    private func liveParticleTransform(_ d: ParticleSystemDescription) -> simd_float4x4 {
+        let original = d.parentTransform * particleTransform(origin: d.origin, angles: d.angles, scale: d.scale)
+        guard let node = scene.nodes[d.id] else { return original }
+        var root = d
+        while let parent = scene.particles.first(where: { p in p.children.contains { $0.seed == root.seed } }) {
+            root = parent
+        }
+        let initial = root.parentTransform * particleTransform(origin: root.origin, angles: root.angles, scale: root.scale)
+        let current = parentTransform(root.id) * particleTransform(origin: node.origin, angles: node.angles, scale: node.scale)
+        if initial == current { return original }
+        return current * initial.inverse * original
+    }
+
     /// Reuse the simulation tree for the scene's flattened draw list.
     func particleState(_ index: Int) -> ParticleRenderState {
         if let state = particleStates[index] { return state }
@@ -94,7 +107,7 @@ extension SceneRenderer {
         let mouse = projection.inverse * SIMD4(pointer.position.x * 2 - 1, 1 - pointer.position.y * 2, 0, 1)
         func update(_ simulation: ParticleSimulation) {
             let d = simulation.description
-            var model = d.parentTransform * particleTransform(origin: d.origin, angles: d.angles, scale: d.scale)
+            var model = liveParticleTransform(d)
             if scene.parallax.enabled {
                 let offset = (d.parallaxDepth + scene.parallax.amount) * pointer.parallax * scene.canvas.x
                 model = translation([offset.x, offset.y, 0]) * model
@@ -109,13 +122,14 @@ extension SceneRenderer {
 
     func renderParticle(_ index: Int, projection: simd_float4x4, slot: Int) throws {
         let d = scene.particles[index]
-        guard d.visible, d.canRender, onlyLayers?.contains(d.name) ?? true,
-              scene.nodes[d.id] == nil || isVisible(d.id) else { return }
+        let isChild = scene.particles.contains { p in p.children.contains { $0.seed == d.seed } }
+        let visible = scene.nodes[d.id] == nil ? d.visible : isVisible(d.id) && (!isChild || d.visible)
+        guard visible, d.canRender, onlyLayers?.contains(d.name) ?? true else { return }
         let state = particleState(index)
         advanceParticle(index, projection: projection)
         let viewProjection = d.flags & 4 == 0 ? projection : particlePerspective(canvas: scene.canvas, output: outputSize,
             fov: scene.particleCamera.fov, near: scene.particleCamera.near, far: scene.particleCamera.far)
-        var model = d.parentTransform * particleTransform(origin: d.origin, angles: d.angles, scale: d.scale)
+        var model = liveParticleTransform(d)
         if scene.parallax.enabled {
             let offset = (d.parallaxDepth + scene.parallax.amount) * pointer.parallax * scene.canvas.x
             model = translation([offset.x, offset.y, 0]) * model

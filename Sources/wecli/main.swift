@@ -27,7 +27,7 @@ func usage() -> Never {
       wecli compare <a.png> <b.png> [--tolerance N] [--diff out.png]   exit 0 = match, 1 = differ
       wecli sound   <wallpaper dir> --assets <dir> [--seconds N] [--click x,y[@s]]   mix sound objects offline, print levels
       wecli bench   <wallpaper dir> --assets <dir> [--size WxH] [--mode fill|fit|stretch] [--frames N] [--cache off] [--layers a,b] [--bloom off] [--fps N]
-      wecli render  <wallpaper dir> --assets <WE assets dir> [--time t] [--size WxH] [--mode fill|fit|stretch] [--prop name=value]...
+      wecli render  <wallpaper dir> --assets <WE assets dir> [--time t] [--size WxH] [--mode fill|fit|stretch] [--prop name=value]... [--live-prop name=value]...
                     [--layers a,b] [--bloom off] [--cache off] [--warm t] [--target _rt_name] --out <out.png>
                     [--pointer x,y[:x2,y2]] [--press s] [--frames N] [--audio hz,hz[:hz,hz]]
                     [--clock yyyy-MM-ddTHH:mm:ss]   wall-clock time scripts see (local time; default now)
@@ -281,9 +281,12 @@ case "pkg":
 case "render":
     var opts: [String: String] = [:]
     var props: [String: String] = [:]
+    var liveProps: [String: String] = [:]
     var i = 3
     while i + 1 < args.count {
-        if args[i] == "--prop", let eq = args[i + 1].firstIndex(of: "=") {
+        if args[i] == "--live-prop", let eq = args[i + 1].firstIndex(of: "=") {
+            liveProps[String(args[i + 1][..<eq])] = String(args[i + 1][args[i + 1].index(after: eq)...])
+        } else if args[i] == "--prop", let eq = args[i + 1].firstIndex(of: "=") {
             props[String(args[i + 1][..<eq])] = String(args[i + 1][args[i + 1].index(after: eq)...])
         } else { opts[args[i]] = args[i + 1] }
         i += 2
@@ -347,6 +350,12 @@ case "render":
         } else {
             for f in 0..<frames - 1 {
                 _ = try renderer.render(width: size[0], height: size[1], time: time - Float(frames - 1 - f) / 30)
+            }
+        }
+        if !liveProps.isEmpty {
+            _ = try renderer.render(width: size[0], height: size[1], time: time)
+            guard renderer.setUserProperties(liveProps) else {
+                throw WEFormatError.unsupported("--live-prop change requires reloading")
             }
         }
         img = try renderer.render(width: size[0], height: size[1], time: time)

@@ -24,9 +24,14 @@ public protocol WallpaperRenderer: AnyObject {
     func render(width: Int, height: Int, time: Float) throws -> CGImage
     /// One-line description for logs ("scene, 17 layers", "video, vp9 1280x720 4.0s").
     var summary: String { get }
+    /// Applies a delta without reload; false leaves the current properties unchanged.
+    func setUserProperties(_ values: [String: String]) -> Bool
 }
 
 public enum Wallpaper {
+    public static func webProperties(project: [String: Any], values: [String: String]) -> [String: [String: Any]] {
+        pageProperties(project, UserProperties(project: project, overrides: values))
+    }
     /// Open a wallpaper folder (one containing project.json) with the renderer its `type` needs.
     public static func open(project: URL, assets: URL?, properties: [String: String] = [:]) throws -> WallpaperRenderer {
         let locator = AssetLocator(project: project, assets: assets)
@@ -42,7 +47,7 @@ public enum Wallpaper {
         case "web"?:
             guard let index = locator.url(file) else { throw WEFormatError.unsupported("web page \(file) not found") }
             let props = UserProperties(project: json, overrides: properties)
-            throw WallpaperError.needsWebKit(.page(index: index, root: project, properties: webProperties(json, props)))
+            throw WallpaperError.needsWebKit(.page(index: index, root: project, properties: pageProperties(json, props)))
         case "application"?:
             throw WEFormatError.unsupported("application wallpapers (Windows programs) are not supported")
         default:
@@ -70,7 +75,7 @@ public enum WallpaperError: Error, CustomStringConvertible {
 /// project.json properties as WE passes them to `applyUserProperties`: `{name: {type, value}}`, with
 /// values converted to the declared type (project files often store booleans/numbers as strings, e.g.
 /// `"value": "true"`, while pages test `value === true`) and user overrides applied.
-func webProperties(_ project: [String: Any], _ user: UserProperties) -> [String: [String: Any]] {
+func pageProperties(_ project: [String: Any], _ user: UserProperties) -> [String: [String: Any]] {
     let declared = (project["general"] as? [String: Any])?["properties"] as? [String: Any] ?? [:]
     var out: [String: [String: Any]] = [:]
     for (name, raw) in declared {

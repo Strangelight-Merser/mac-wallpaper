@@ -17,14 +17,16 @@ public struct SoundObject {
     public let name: String
     public let files: [String]
     public let mode: Mode
-    public let volume: Float
+    public internal(set) var volume: Float
     /// Silent until a script starts it.
     public let startSilent: Bool
     public let minTime: Double
     public let maxTime: Double
 
     init?(object o: [String: Any], properties: UserProperties) {
-        guard let files = o["sound"] as? [String], !files.isEmpty else { return nil }
+        let raw = properties.resolve(o["sound"])
+        let files = (raw as? [Any] ?? (raw as? String).map { [$0] } ?? []).compactMap { properties.resolve($0) as? String }
+        guard !files.isEmpty else { return nil }
         id = (o["id"] as? NSNumber)?.intValue ?? -1
         name = o["name"] as? String ?? "sound"
         self.files = files
