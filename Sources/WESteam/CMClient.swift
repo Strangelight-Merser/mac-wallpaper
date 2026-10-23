@@ -1,4 +1,5 @@
 import Foundation
+import WEFormat
 
 /// CM session lifecycle diagnostics without sensitive payloads.
 public enum SteamCMEvent: Sendable, Equatable {
@@ -35,6 +36,7 @@ public actor SteamCMClient {
         let expected: EMsg
         let continuation: CheckedContinuation<CMPacket, Error>
         let timeout: Task<Void, Never>
+        var responseBody = Data()
     }
 
     public init(machineName: String) {
@@ -140,6 +142,19 @@ public actor SteamCMClient {
         guard response.header.result == 1 else { throw SteamError.result(response.header.result ?? 2) }
         return response.body
     }
+    /// Fetches text KeyValues app information using a PICS access token.
+    public func appInfo(appID: UInt32) async throws -> VDF.Value {
+        guard session != nil else { throw SteamError.disconnected }
+        let attempt = generation
+        let tokenReply = try await request(.picsAccessToken, expected: .picsAccessTokenResponse,
+                                           body: PICS.accessTokenRequest(appID))
+        let token = try PICS.accessToken(tokenReply.body, appID: appID)
+        guard generation == attempt, session != nil else { throw SteamError.disconnected }
+        let reply = try await request(.picsProductInfo, expected: .picsProductInfoResponse,
+                                      body: PICS.productInfoRequest(appID, token: token))
+        guard generation == attempt, session != nil else { throw SteamError.disconnected }
+        return try PICS.appInfo(reply.body, appID: appID)
+    }
     public func depotDecryptionKey(appID: UInt32, depotID: UInt32) async throws -> Data {
         guard session != nil else { throw SteamError.disconnected }
         if let key = keys[depotID] { return key }
@@ -203,7 +218,15 @@ public actor SteamCMClient {
             end(.result(Int(Int32(truncatingIfNeeded: result))), notify: true); return
         }
         let job = packet.message == EMsg.logOnResponse.rawValue ? (logonJob ?? .max) : packet.header.targetJob
-        if let pending = jobs[job], pending.expected.rawValue == packet.message { finish(job, .success(packet)) }
+        if var pending = jobs[job], pending.expected.rawValue == packet.message {
+            if packet.message == EMsg.picsProductInfoResponse.rawValue {
+                // steammessages_clientserver_appinfo.proto: response_pending = 6.
+                pending.responseBody.append(packet.body)
+                if try ProtoReader(packet.body).uint(6) != 0 { jobs[job] = pending; return }
+                var complete = packet; complete.body = pending.responseBody
+                finish(job, .success(complete))
+            } else { finish(job, .success(packet)) }
+        }
     }
     private func sendHeartbeat(_ id: UUID) async throws {
         guard id == generation, let socket = connection else { return }

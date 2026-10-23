@@ -84,7 +84,7 @@ let package = Package(
         .testTarget(name: "WEShaderTests", dependencies: ["WEShader", "WEFormat"]),
         .target(name: "WEVideo"),
         .target(name: "CSteamSupport", linkerSettings: [.linkedLibrary("lzma"), .linkedLibrary("z")]),
-        .target(name: "WESteam", dependencies: ["CSteamSupport"],
+        .target(name: "WESteam", dependencies: ["CSteamSupport", "WEFormat"],
                 swiftSettings: [.unsafeFlags(["-swift-version", "6"])]),
         .testTarget(name: "WESteamTests", dependencies: ["WESteam", "CSteamSupport"]),
         // System audio capture (ScreenCaptureKit) and WE's audio spectrum analysis.

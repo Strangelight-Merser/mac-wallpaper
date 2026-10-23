@@ -5,6 +5,7 @@ enum EMsg: UInt32 {
     case multi = 1, serviceResponse = 147, serviceCall = 151
     case heartbeat = 703, logOff = 706, logOnResponse = 751, loggedOff = 757
     case depotKey = 5438, depotKeyResponse = 5439, logOn = 5514
+    case picsProductInfo = 8903, picsProductInfoResponse = 8904, picsAccessToken = 8905, picsAccessTokenResponse = 8906
 }
 
 // steammessages_base.proto, CMsgProtoBufHeader.
