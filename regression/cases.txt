@@ -166,3 +166,11 @@ fixture/particletest.t3             regression/fixtures/particletest            
 # fallback, an effect on a text layer, and a hidden text object.
 fixture/texttest                    regression/fixtures/texttest                         --size 1024x512
 fixture/texttest.small              regression/fixtures/texttest                         --size 512x256
+#
+# SceneScript. scripttest is our own fixture (regression/fixtures/scripttest) with our own scripts: a clock
+# and a date (fixed --clock from regress.sh), a user-bound script property, a script moving a group with a
+# child, visibility through `shared`, an effect constant and an effect toggled by scripts, and timers.
+fixture/scripttest.t0               regression/fixtures/scripttest                       --time 0 --size 1024x512
+fixture/scripttest.t3               regression/fixtures/scripttest                       --time 3 --size 1024x512
+fixture/scripttest.frames           regression/fixtures/scripttest                       --time 2 --frames 60 --size 1024x512
+fixture/scripttest.props            regression/fixtures/scripttest                       --time 3 --size 1024x512 --prop showseconds=false

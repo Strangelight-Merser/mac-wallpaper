@@ -27,7 +27,8 @@ if [[ ${1:-} == --case ]]; then
   mkdir -p ${out:h}
   # Paths under regression/ are self-generated test content; everything else lives in $SAMPLES.
   [[ $wallpaper == regression/* ]] && wallpaper=$ROOT/$wallpaper || wallpaper=$SAMPLES/$wallpaper
-  log=$("$WECLI" render "$wallpaper" --assets "$SAMPLES/wallpaper_engine/assets" "$@" --out "$out" 2>&1)
+  # A fixed wall clock: SceneScripts (clocks, colour cycles) read the time.
+  log=$("$WECLI" render "$wallpaper" --assets "$SAMPLES/wallpaper_engine/assets" --clock 2026-01-01T12:34:56 "$@" --out "$out" 2>&1)
   if [[ $? != 0 || ! -f $out ]]; then
     echo "ERROR    $name: $(print -r -- $log | tail -1)"; exit 0
   fi

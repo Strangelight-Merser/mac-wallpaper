@@ -1,6 +1,7 @@
 import Foundation
 import simd
 import WEFormat
+import WEScript
 
 /// User-adjustable properties from project.json (`general.properties`), plus CLI/app overrides.
 public struct UserProperties {
@@ -73,6 +74,8 @@ public struct SceneDescription {
         public var copy: (source: String, target: String)?
         /// `{"command": "swap"}`: exchange two FBOs (ping-pong simulations); uses `copy` for the names.
         public var swap = false
+        /// Effect passes: index of the scene.json pass override (`effects[k].passes[j]`) this pass came from.
+        public var overrideIndex: Int?
 
         init(material: [String: Any], label: String) {
             shader = material["shader"] as? String ?? "genericimage"
@@ -153,9 +156,9 @@ public struct SceneDescription {
         public let scale: SIMD3<Float>
         public let angles: SIMD3<Float>
         public let size: SIMD2<Float>
-        public let alpha: Float
-        public let brightness: Float
-        public let color: SIMD3<Float>
+        public internal(set) var alpha: Float
+        public internal(set) var brightness: Float
+        public internal(set) var color: SIMD3<Float>
         public let colorBlendMode: Int
         /// `passthrough` models: the first pass draws the layer's screen-space quad (e.g. to sample the
         /// frame buffer behind it); `fullscreen` ones cover the whole canvas.
@@ -172,10 +175,23 @@ public struct SceneDescription {
         public let effectFBOs: [[EffectFBO]]
         /// How far the layer moves with camera parallax (added to the scene's `amount`).
         public let parallaxDepth: SIMD2<Float>
-        /// World transform of the object's scene parent (`"parent"`), identity for top-level objects.
-        public let parentTransform: simd_float4x4
         /// Text objects: the layer's base texture is the rendered text (`textTextureName`).
         public let text: TextObject?
+        /// scene.json effect index (`effects[k]`) → index into `effectNames`.
+        public let effectSlots: [Int: Int]
+        /// Effects kept only because a script controls their visibility, hidden at load.
+        public let hiddenEffects: Set<Int>
+    }
+
+    /// Any scene object's place in the hierarchy and its transform, which scripts may change.
+    public struct SceneNode {
+        public let name: String
+        public let parent: Int?
+        public internal(set) var origin: SIMD3<Float>
+        public internal(set) var scale: SIMD3<Float>
+        public internal(set) var angles: SIMD3<Float>
+        /// The object's own visibility; it is shown only if its ancestors are visible too.
+        public internal(set) var visible: Bool
     }
 
     /// Base texture name of a text layer, provided by the renderer.
@@ -195,7 +211,12 @@ public struct SceneDescription {
     public let bloom: (enabled: Bool, strength: Float, threshold: Float)
     public let parallax: Parallax
     let particleCamera: (fov: Float, near: Float, far: Float)
-    public let layers: [ImageLayer]
+    public internal(set) var layers: [ImageLayer]
+    /// Every object with an id, and the ids in scene.json order.
+    public internal(set) var nodes: [Int: SceneNode]
+    public let nodeOrder: [Int]
+    /// SceneScript-driven properties per object id.
+    public let scripts: [(object: Int, properties: [ScriptedProperty])]
     public let particles: [ParticleSystemDescription]
     public let drawOrder: [SceneObject]
     public let properties: UserProperties
@@ -243,6 +264,24 @@ public struct SceneDescription {
             return o
         }
         let hierarchy = ObjectHierarchy(objects, properties: props)
+        var nodes: [Int: SceneNode] = [:], nodeOrder: [Int] = []
+        var scripts: [(object: Int, properties: [ScriptedProperty])] = []
+        for o in objects {
+            guard let id = (o["id"] as? NSNumber)?.intValue, nodes[id] == nil else { continue }
+            func v3(_ k: String, _ d: Float) -> SIMD3<Float> {
+                let f = parseFloats(props.resolve(o[k])) ?? [d, d, d]
+                return SIMD3(f[0], f[safe: 1] ?? d, f[safe: 2] ?? d)
+            }
+            nodes[id] = SceneNode(name: o["name"] as? String ?? "", parent: (o["parent"] as? NSNumber)?.intValue,
+                                  origin: v3("origin", 0), scale: v3("scale", 1), angles: v3("angles", 0),
+                                  visible: props.bool(o["visible"]))
+            nodeOrder.append(id)
+            let scripted = ScriptedProperty.discover(in: o)
+            if !scripted.isEmpty { scripts.append((id, scripted)) }
+        }
+        self.nodes = nodes
+        self.nodeOrder = nodeOrder
+        self.scripts = scripts
         for obj in objects {
             let name = obj["name"] as? String ?? "?"
             let parent = hierarchy.parent(of: obj)
@@ -287,14 +326,18 @@ public struct SceneDescription {
 
             var effectNames: [String] = []
             var effectFBOs: [[EffectFBO]] = []
-            for case let eff as [String: Any] in obj["effects"] as? [Any] ?? [] {
-                guard let file = eff["file"] as? String else { continue }
+            var effectSlots: [Int: Int] = [:], hiddenEffects = Set<Int>()
+            for (slot, eff) in (obj["effects"] as? [Any] ?? []).enumerated() {
+                guard let eff = eff as? [String: Any], let file = eff["file"] as? String else { continue }
                 let ename = (file as NSString).deletingLastPathComponent.components(separatedBy: "/").last ?? file
-                guard props.bool(eff["visible"]) else { continue }
+                let shown = props.bool(eff["visible"])
+                // Hidden effects are dropped unless a script may show them.
+                guard shown || (eff["visible"] as? [String: Any])?["script"] != nil else { continue }
                 do {
                     let def = try locator.json(file)
                     let effectIndex = effectNames.count
                     var overrides = (eff["passes"] as? [[String: Any]] ?? [])[...]
+                    var overrideIndex = 0
                     var effectPasses: [Pass] = []
                     for p in def["passes"] as? [[String: Any]] ?? [] {
                         guard let mp = p["material"] as? String else {
@@ -311,6 +354,7 @@ public struct SceneDescription {
                             continue
                         }
                         let o = overrides.popFirst() ?? [:]
+                        defer { overrideIndex += 1 }
                         var binds: [Int: String] = [:]
                         var bindConditions: [Int: [[String: Int]]] = [:]
                         for case let b as [String: Any] in p["bind"] as? [Any] ?? [] {
@@ -324,6 +368,7 @@ public struct SceneDescription {
                             var pass = Pass(material: mpass, label: ename)
                             pass.apply(override: o, properties: props)
                             pass.effect = effectIndex
+                            pass.overrideIndex = overrideIndex
                             pass.target = p["target"] as? String
                             pass.binds = binds
                             pass.bindConditions = bindConditions
@@ -336,6 +381,8 @@ public struct SceneDescription {
                     }
                     for i in effectPasses.indices { effectPasses[i].effectCombos = effectCombos }
                     passes += effectPasses
+                    effectSlots[slot] = effectIndex
+                    if !shown { hiddenEffects.insert(effectIndex) }
                     effectNames.append(ename)
                     effectFBOs.append((def["fbos"] as? [[String: Any]] ?? []).map(EffectFBO.init))
                 } catch {
@@ -369,7 +416,8 @@ public struct SceneDescription {
                 visible: visible,
                 passes: passes, effectNames: effectNames, effectFBOs: effectFBOs,
                 parallaxDepth: SIMD2(depth[0], depth[safe: 1] ?? depth[0]),
-                parentTransform: fullscreen ? matrix_identity_float4x4 : parent.transform, text: text))
+                text: text,
+                effectSlots: effectSlots, hiddenEffects: hiddenEffects))
         }
         self.layers = layers
         self.particles = particles

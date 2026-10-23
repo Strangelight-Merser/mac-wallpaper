@@ -1,6 +1,6 @@
 # SceneScript runtime (implementation spec)
 
-Status: spec for implementation (2026-10-23). Background: `docs/design.md` §6.25 (feature survey of the user's
+Status: implemented and merged (2026-10-23); review notes and integration in `docs/design.md` §6.26. Background: `docs/design.md` §6.25 (feature survey of the user's
 wallpapers: SceneScript is used by 9 of 16, and nearly every text object — clocks, dates, song titles — gets its
 value from a script).
 

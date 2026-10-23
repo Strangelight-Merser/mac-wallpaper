@@ -52,10 +52,10 @@
         mix: (a,b,t) => a*(1-t)+b*t,
         smoothStep(a,b,x) { const t=WEMath.clamp((x-a)/(b-a),0,1); return t*t*(3-2*t); }
     };
-    // Hue in degrees, saturation/value in [0,1], matching the reference module.
+    // Normalized HSV (hue 0…1, as WE documents and real scripts use; the reference module used degrees).
     const WEColor = {
         hsv2rgb(v) {
-            const h=((v.x%360)+360)%360/60, i=Math.floor(h), f=h-i;
+            const h=((v.x%1)+1)%1*6, i=Math.floor(h), f=h-i;
             const p=v.z*(1-v.y), q=v.z*(1-v.y*f), t=v.z*(1-v.y*(1-f));
             return new Vec3(...[[v.z,t,p],[q,v.z,p],[p,v.z,t],[p,q,v.z],[t,p,v.z],[v.z,p,q]][i]);
         },
@@ -63,7 +63,7 @@
             const max=Math.max(v.x,v.y,v.z), min=Math.min(v.x,v.y,v.z), d=max-min;
             let h=0;
             if(d) h=60*(max===v.x ? (v.y-v.z)/d : max===v.y ? (v.z-v.x)/d+2 : (v.x-v.y)/d+4);
-            return new Vec3((h+360)%360,max ? d/max : 0,max);
+            return new Vec3((h+360)%360/360,max ? d/max : 0,max);
         },
         normalizeColor: v => new Vec3(v).divide(255),
         expandColor: v => new Vec3(v).multiply(255),

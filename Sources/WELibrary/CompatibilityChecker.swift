@@ -28,7 +28,7 @@ public struct Compatibility: Codable, Sendable, Equatable {
 
 /// Checks local assets and unsupported features without needing a GPU for static checks.
 public struct CompatibilityChecker: Sendable {
-    public static let version = 3
+    public static let version = 4
     private let assets: URL?
 
     public init(assets: URL?) { self.assets = assets }
@@ -94,9 +94,8 @@ public struct CompatibilityChecker: Sendable {
         let props = UserProperties(project: project)
         var result = Compatibility(status: .supported)
         func add(_ feature: Feature) { result.missing[feature, default: 0] += 1 }
-        if containsScript(raw["general"]) || containsScript(project["general"]) { add(.sceneScript) }
+        // Scripts run; only the parts they use that are not supported yet show up (deep check warnings).
         for case let object as [String: Any] in raw["objects"] as? [Any] ?? [] {
-            if containsScript(object) { add(.sceneScript) }
             if object["particle"] != nil || object["text"] != nil { continue }
             guard let image = object["image"] as? String else {
                 let kinds: [(String, Feature)] = [("model", .model3D), ("sound", .sound), ("light", .light)]
@@ -169,12 +168,6 @@ public struct CompatibilityChecker: Sendable {
     }
 }
 
-private func containsScript(_ value: Any?) -> Bool {
-    if let dictionary = value as? [String: Any] {
-        return dictionary["script"] != nil || dictionary["scriptproperties"] != nil || dictionary.values.contains { containsScript($0) }
-    }
-    return (value as? [Any])?.contains { containsScript($0) } ?? false
-}
 
 private actor DeepCheck {
     static let shared = DeepCheck()
@@ -203,6 +196,9 @@ private actor DeepCheck {
                 let mappings: [(String, Feature)] = [("model object", .model3D), ("sound object", .sound), ("light object", .light),
                     ("other object", .unknownObject), ("video textures", .videoTexture), ("asset not found", .missingAsset)]
                 if lower.contains(": particle "), lower.hasSuffix("not supported") { warningFeatures[.particles, default: 0] += 1 }
+                if lower.hasPrefix("scenescript"), lower.contains("not supported") || lower.contains("unsupported") {
+                    warningFeatures[.sceneScript, default: 0] += 1
+                }
                 for (text, feature) in mappings where lower.contains(text) { warningFeatures[feature, default: 0] += 1 }
             }
             if !diagnostics.isEmpty {

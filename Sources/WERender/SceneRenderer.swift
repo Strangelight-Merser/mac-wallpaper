@@ -4,6 +4,7 @@ import Metal
 import simd
 import WEAudio
 import WEFormat
+import WEScript
 import WEShader
 
 /// Offscreen Metal renderer for image-layer scenes with effects (milestones M3/M4).
@@ -19,7 +20,22 @@ public final class SceneRenderer: WallpaperRenderer {
     public let device: MTLDevice
     public let queue: MTLCommandQueue
     let locator: AssetLocator
-    public let scene: SceneDescription
+    public internal(set) var scene: SceneDescription
+    /// SceneScript: the engine (created on the first frame), the wall clock scripts see (nil = now; fixed
+    /// for reproducible offline renders) and where `localStorage` persists (nil = memory only).
+    var scriptEngine: SceneScriptEngine?
+    public var scriptClock: Date?
+    public var scriptStorageURL: URL?
+    var lastScriptTime: Double?
+    var scriptedLayers = Set<Int>()
+    var scriptWarnings = Set<String>()
+    var cachedLayerIndexByID: [Int: Int]?
+    /// Per frame: world transforms by object id.
+    var worldCache: [Int: simd_float4x4] = [:]
+    /// Per layer: effects currently hidden by scripts (initially `ImageLayer.hiddenEffects`).
+    var hiddenEffects: [Int: Set<Int>] = [:]
+    /// Layers whose uniform templates scripts changed since their last draw.
+    var uniformsDirty = Set<Int>()
     /// Human-readable notes about anything skipped or approximated.
     public private(set) var warnings: [String] = []
     private var warningSet = Set<String>()
@@ -79,6 +95,8 @@ public final class SceneRenderer: WallpaperRenderer {
     /// Text layers by layer index, and text set by scripts (overriding the static value).
     var textStates: [Int: TextLayerState] = [:]
     var textOverrides: [Int: String] = [:]
+    var textObjectOverrides: [Int: TextObject] = [:]
+    var scriptAnimations: [Int: StillAnimation] = [:]
     var samplers: [Bool: MTLSamplerState] = [:]
     var time: Float = 0
     var outputSize = SIMD2<Float>(1, 1)
@@ -166,10 +184,12 @@ public final class SceneRenderer: WallpaperRenderer {
         fullFrameValid = false
         self.commandBuffer = commandBuffer
 
+        let projection = coverProjection(output: outputSize)
+        worldCache = [:]
+        runScripts(projection: projection)
         updateTextLayers()
         let c = scene.clearColor
         _ = encoder(for: sceneTarget, clear: MTLClearColor(red: Double(c.x), green: Double(c.y), blue: Double(c.z), alpha: 1))
-        let projection = coverProjection(output: outputSize)
         let particleSlot = scene.particles.isEmpty ? 0 : particleRing.acquire(commandBuffer)
         for object in renderOrder {
             switch object {
@@ -374,24 +394,40 @@ public final class SceneRenderer: WallpaperRenderer {
 
     func renderLayer(_ index: Int, projection: simd_float4x4) throws {
         let layer = scene.layers[index]
-        let passes = layerPasses[index]
+        // Passes of effects hidden by scripts are skipped; plan keys keep the pass's original index.
+        let hidden = hiddenEffects[index] ?? layer.hiddenEffects
+        var kept = Array(layerPasses[index].enumerated())
+        if !hidden.isEmpty {
+            let blending = kept.last?.element.blending ?? "normal"
+            kept = kept.filter { $0.element.effect.map { !hidden.contains($0) } ?? true }
+            // The layer's blending sits on its last pass (see `layerPasses`); move it to the new last pass.
+            if !kept.isEmpty { kept[kept.count - 1].element.blending = blending }
+        }
+        let passes = kept.map(\.element)
         let size = layerSizes[index]
         guard !passes.isEmpty, size.x > 0, size.y > 0 else { return }
 
         let w = max(1, Int(size.x.rounded())), h = max(1, Int(size.y.rounded()))
         // Hidden layers render into their composite FBO instead of the scene, for other layers to read.
-        let toScene = layer.visible
+        let toScene = layer.fullscreen || scene.nodes[layer.id] == nil ? layer.visible : isVisible(layer.id)
         let fbo = (passes.count > 1 || !toScene) ? compositeTargets(index, w, h) : []
-        var model = layer.parentTransform * translation(layer.origin) * rotationZ(layer.angles.z) * scaling(layer.scale)
-            * translation(textOffset(index))
+        var model: simd_float4x4
+        if let node = scene.nodes[layer.id], !layer.fullscreen {
+            model = parentTransform(layer.id) * translation(node.origin) * rotationZ(node.angles.z) * scaling(node.scale)
+        } else {
+            model = translation(layer.origin) * rotationZ(layer.angles.z) * scaling(layer.scale)
+        }
+        model *= translation(textOffset(index))
         if scene.parallax.enabled {
             let d = (layer.parallaxDepth + scene.parallax.amount) * pointer.parallax * scene.canvas.x
             model = translation(SIMD3(d.x, d.y, 0)) * model
         }
         effectProjection = Self.effectTextureProjection(projection * model, half: size / 2)
         defer { effectProjection = matrix_identity_float4x4 }
+        let refresh = uniformsDirty.remove(index) != nil
         let plans = try passes.enumerated().map { i, pass -> PassPlan? in
-            pass.copy != nil ? nil : try self.plan("L\(index).\(i)", pass: pass, layer: layer, model: model, hasPrevious: i > 0)
+            pass.copy != nil ? nil : try self.plan("L\(index).\(kept[i].offset)", pass: pass, layer: layer, model: model,
+                                                   hasPrevious: i > 0, refreshUniforms: refresh)
         }
         // Effect FBOs visible to a pass (layer composites are looked up globally).
         func scope(for pass: SceneDescription.Pass) -> [String: LoadedTexture] {
@@ -413,7 +449,7 @@ public final class SceneRenderer: WallpaperRenderer {
         // whose output never changes are rendered once into a dedicated texture.
         let lastDrawingPass = passes.lastIndex { $0.copy == nil } ?? passes.count - 1
         var staticPrefix = 0
-        if !disableLayerCache {
+        if !disableLayerCache, !scriptedLayers.contains(index) {
             while staticPrefix < lastDrawingPass, let p = plans[staticPrefix], !p.isDynamic,
                   passes[staticPrefix].target == nil, passes[staticPrefix].binds.isEmpty {
                 staticPrefix += 1
@@ -568,20 +604,79 @@ public final class SceneRenderer: WallpaperRenderer {
     }
 
     var plans: [String: PassPlan] = [:]
+
+    /// Uniform buffer template for a stage: static values written, per-frame values recorded as patches.
+    func uniformPlan(_ stage: CompiledStage, program: Program, ctx: DrawContext, particle: Bool) -> PassPlan.UniformPlan? {
+        guard let index = stage.uniformBufferIndex else { return nil }
+        var buf = [UInt8](repeating: 0, count: max(stage.uniformBlockSize, 16))
+        var patches: [(patch: PassPlan.Patch, offset: Int, type: String, stride: Int)] = []
+        for m in stage.uniforms {
+            let patch: PassPlan.Patch? = {
+                if particle, ["g_ModelMatrix", "g_ModelMatrixInverse", "g_ViewProjectionMatrix", "g_OrientationUp",
+                              "g_OrientationRight", "g_OrientationForward", "g_ViewUp", "g_ViewRight", "g_EyePosition",
+                              "g_RenderVar0", "g_RenderVar1"].contains(m.name) { return .particle(m.name) }
+                switch m.name {
+                case "g_ModelViewProjectionMatrix", "g_EffectModelViewProjectionMatrix": return .mvp
+                case "g_ModelViewProjectionMatrixInverse": return .mvpInverse
+                case "g_Time": return .time
+                case "g_TexelSize": return .texelSize
+                case "g_TexelSizeHalf": return .texelSizeHalf
+                case "g_Screen": return .screen
+                case "g_PointerPosition": return .pointer
+                case "g_PointerPositionLast": return .pointerLast
+                case "g_PointerState": return .pointerState
+                case "g_ParallaxPosition": return .parallaxPosition
+                case "g_EffectTextureProjectionMatrix": return .effectProjection
+                case "g_EffectTextureProjectionMatrixInverse": return .effectProjectionInverse
+                default:
+                    if m.name.hasPrefix("g_AudioSpectrum"), let bands = Int(m.name.dropFirst(15).prefix(2)) {
+                        return .audio(bands: bands, right: m.name.hasSuffix("Right"))
+                    }
+                    if m.name.hasPrefix("g_Texture"), m.name.hasSuffix("Resolution"),
+                       let i = Int(m.name.dropFirst(9).dropLast(10)) { return .resolution(i) }
+                    return nil
+                }
+            }()
+            if let patch { patches.append((patch, m.offset, m.type, m.arrayStride)); continue }
+            guard let v = value(for: m.name, program: program, ctx: ctx) else {
+                warn("\(ctx.pass.shader): no value for \(m.name)")
+                continue
+            }
+            if m.arrayCount > 1 {
+                let per = max(1, v.count / m.arrayCount)
+                for k in 0..<m.arrayCount {
+                    write(Array(v.dropFirst(k * per).prefix(per)), type: m.type, at: m.offset + k * m.arrayStride, into: &buf)
+                }
+            } else {
+                write(v, type: m.type, at: m.offset, into: &buf)
+            }
+        }
+        return PassPlan.UniformPlan(bufferIndex: index, template: buf, patches: patches)
+    }
     /// The current layer's `g_EffectTextureProjectionMatrix` (identity outside layers).
     var effectProjection = matrix_identity_float4x4
 
     func plan(_ key: String, pass: SceneDescription.Pass, layer: SceneDescription.ImageLayer?, model: simd_float4x4,
               hasPrevious: Bool, fixedInputs: [String] = [], particle: Bool = false,
-              fixedTextures: [Int: LoadedTexture] = [:]) throws -> PassPlan {
-        if let p = plans[key] { return p }
+              fixedTextures: [Int: LoadedTexture] = [:], refreshUniforms: Bool = false) throws -> PassPlan {
+        if let p = plans[key] {
+            // Scripts changed values baked into the uniform templates (alpha, colour, constants).
+            if refreshUniforms {
+                let textures = p.inputs.compactMapValues { if case .fixed(let t) = $0 { return t } else { return nil } }
+                let ctx = DrawContext(layer: layer, pass: pass, mvp: matrix_identity_float4x4, model: model, textures: textures)
+                p.vertexUniforms = uniformPlan(p.program.compiled.vertex, program: p.program, ctx: ctx, particle: p.particle)
+                p.fragmentUniforms = uniformPlan(p.program.compiled.fragment, program: p.program, ctx: ctx, particle: p.particle)
+            }
+            return p
+        }
 
         // Slot sources: explicit textures, else (effects) slot 0 = previous pass output.
         var sources: [Int: PassPlan.Input] = [:]
         for (slot, name) in (fixedInputs.isEmpty ? pass.textures : fixedInputs.map { Optional($0) }).enumerated() {
             guard let name else { continue }
             if fixedTextures[slot] == nil {
-                sources[slot] = name.hasPrefix("_rt_") ? .named(name) : .fixed(try resolveTexture(name))
+                // Text textures are replaced when the text changes: look them up at draw time.
+                sources[slot] = name.hasPrefix("_rt_") || name.hasPrefix("$text:") ? .named(name) : .fixed(try resolveTexture(name))
             }
         }
         for (slot, texture) in fixedTextures { sources[slot] = .fixed(texture) }
@@ -626,55 +721,8 @@ public final class SceneRenderer: WallpaperRenderer {
         // Uniform templates: static values written once; per-frame values recorded as patches.
         let staticTextures = sources.compactMapValues { if case .fixed(let t) = $0 { return t } else { return nil } }
         let ctx = DrawContext(layer: layer, pass: pass, mvp: matrix_identity_float4x4, model: model, textures: staticTextures)
-        func uniformPlan(_ stage: CompiledStage) -> PassPlan.UniformPlan? {
-            guard let index = stage.uniformBufferIndex else { return nil }
-            var buf = [UInt8](repeating: 0, count: max(stage.uniformBlockSize, 16))
-            var patches: [(patch: PassPlan.Patch, offset: Int, type: String, stride: Int)] = []
-            for m in stage.uniforms {
-                let patch: PassPlan.Patch? = {
-                    if particle, ["g_ModelMatrix", "g_ModelMatrixInverse", "g_ViewProjectionMatrix", "g_OrientationUp",
-                                  "g_OrientationRight", "g_OrientationForward", "g_ViewUp", "g_ViewRight", "g_EyePosition",
-                                  "g_RenderVar0", "g_RenderVar1"].contains(m.name) { return .particle(m.name) }
-                    switch m.name {
-                    case "g_ModelViewProjectionMatrix", "g_EffectModelViewProjectionMatrix": return .mvp
-                    case "g_ModelViewProjectionMatrixInverse": return .mvpInverse
-                    case "g_Time": return .time
-                    case "g_TexelSize": return .texelSize
-                    case "g_TexelSizeHalf": return .texelSizeHalf
-                    case "g_Screen": return .screen
-                    case "g_PointerPosition": return .pointer
-                    case "g_PointerPositionLast": return .pointerLast
-                    case "g_PointerState": return .pointerState
-                    case "g_ParallaxPosition": return .parallaxPosition
-                    case "g_EffectTextureProjectionMatrix": return .effectProjection
-                    case "g_EffectTextureProjectionMatrixInverse": return .effectProjectionInverse
-                    default:
-                        if m.name.hasPrefix("g_AudioSpectrum"), let bands = Int(m.name.dropFirst(15).prefix(2)) {
-                            return .audio(bands: bands, right: m.name.hasSuffix("Right"))
-                        }
-                        if m.name.hasPrefix("g_Texture"), m.name.hasSuffix("Resolution"),
-                           let i = Int(m.name.dropFirst(9).dropLast(10)) { return .resolution(i) }
-                        return nil
-                    }
-                }()
-                if let patch { patches.append((patch, m.offset, m.type, m.arrayStride)); continue }
-                guard let v = value(for: m.name, program: program, ctx: ctx) else {
-                    warn("\(pass.shader): no value for \(m.name)")
-                    continue
-                }
-                if m.arrayCount > 1 {
-                    let per = max(1, v.count / m.arrayCount)
-                    for k in 0..<m.arrayCount {
-                        write(Array(v.dropFirst(k * per).prefix(per)), type: m.type, at: m.offset + k * m.arrayStride, into: &buf)
-                    }
-                } else {
-                    write(v, type: m.type, at: m.offset, into: &buf)
-                }
-            }
-            return PassPlan.UniformPlan(bufferIndex: index, template: buf, patches: patches)
-        }
-        plan.vertexUniforms = uniformPlan(program.compiled.vertex)
-        plan.fragmentUniforms = uniformPlan(program.compiled.fragment)
+        plan.vertexUniforms = uniformPlan(program.compiled.vertex, program: program, ctx: ctx, particle: particle)
+        plan.fragmentUniforms = uniformPlan(program.compiled.fragment, program: program, ctx: ctx, particle: particle)
         let frameVarying: Set<String> = ["g_Time", "g_Daytime", "g_TexelSize", "g_TexelSizeHalf", "g_Screen",
                                          "g_PointerPosition", "g_PointerPositionLast", "g_PointerState",
                                          "g_ParallaxPosition", "g_EffectTextureProjectionMatrix",

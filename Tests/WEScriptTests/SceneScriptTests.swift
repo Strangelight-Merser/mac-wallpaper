@@ -139,8 +139,8 @@ final class SceneScriptTests: XCTestCase {
         XCTAssertEqual(add(e,h,"export function init(){return new Vec3(1,0,0).cross(new Vec3(0,1,0));}"),.vec3(.init(0,0,1)))
         XCTAssertEqual(add(e,h,"export function init(){return new Vec3(2,4,8).subtract(1).mix(new Vec3(5,7,11),0.25);}"),.vec3(.init(2,4,8)))
         XCTAssertEqual(add(e,h,"export function init(){let v=new Vec2(3,4);return v.length()+v.lengthSqr()+v.normalize().dot(new Vec2(5,0));}"),.number(33))
-        XCTAssertEqual(add(e,h,"import {hsv2rgb} from 'WEColor'; export function init(){return hsv2rgb(new Vec3(120,1,0.5));}"),.vec3(.init(0,0.5,0)))
-        XCTAssertEqual(add(e,h,"import * as C from 'WEColor'; export function init(){return C.rgb2hsv(C.normalizeColor(new Vec3(0,0,255)));}"),.vec3(.init(240,1,1)))
+        XCTAssertEqual(add(e,h,"import {hsv2rgb} from 'WEColor'; export function init(){return hsv2rgb(new Vec3(0.5,1,0.5));}"),.vec3(.init(0,0.5,0.5)))
+        XCTAssertEqual(add(e,h,"import * as C from 'WEColor'; export function init(){return C.rgb2hsv(C.normalizeColor(new Vec3(0,0,255)));}"),.vec3(.init(2.0/3,1,1)))
         XCTAssertEqual(add(e,h,"import * as M from 'WEMath'; export function init(){return M.mix(2,6,0.25)+M.clamp(8,0,2)+M.smoothStep(1,0,0.5);}"),.number(5.5))
         assertClean(h)
     }

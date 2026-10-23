@@ -70,7 +70,8 @@ final class ParticleRenderState {
 extension SceneRenderer {
     func renderParticle(_ index: Int, projection: simd_float4x4, slot: Int) throws {
         let d = scene.particles[index]
-        guard d.visible, d.canRender, onlyLayers?.contains(d.name) ?? true else { return }
+        guard d.visible, d.canRender, onlyLayers?.contains(d.name) ?? true,
+              scene.nodes[d.id] == nil || isVisible(d.id) else { return }
         if particleStates[index] == nil { particleStates[index] = ParticleRenderState(d) }
         let state = particleStates[index]!
         let viewProjection = d.flags & 4 == 0 ? projection : particlePerspective(canvas: scene.canvas, output: outputSize,

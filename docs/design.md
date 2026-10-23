@@ -574,6 +574,31 @@ SwiftUI（macOS 14），原生 macOS 风格，作为风格讨论的基础；代�
 
 **下一步候选**：文字（时钟）、SceneScript、声音对象——都要改 `Scene.swift` 和 `SceneRenderer.swift`，所以放在粒子合并之后；App 里的 WE assets 下载和首次引导。
 
+## 6.26 文字、对象层级、SceneScript（2026-10-23）
+
+**调查**：用户 16 个下载里有 57 个文字对象，几乎全部由脚本给出内容（时钟、日期、歌名）；这些壁纸一共用了约 100 个不同的 SceneScript，除了文字，还控制可见性、颜色、位置、缩放和特效参数。另有 95 个对象挂在父对象下（图片、文字、粒子，以及只有变换的"组"对象），之前渲染器不支持层级。
+
+**对象层级**（我做）：子对象的变换 = 父对象世界变换 × 自身变换，祖先隐藏则子对象也隐藏。WE 会省略等于默认值的字段：顶层对象没写 origin 时在画布中心，子对象没写时在父对象原点（"Girls Band Cry"的主图之前因此缩在左下角）。
+
+**文字**（我做，`Sources/WERender/Text/`）：
+- 用 CoreText 把字符串画成 8 位覆盖率纹理，交给 WE 自己的 `materials/fonts/basefont`（`font` shader，`g_Color4` = 颜色和透明度）画到刚好包住文字的框里；文字层上的特效和图片层一样工作。
+- 尺寸规则从 49 个真实文字对象的 `size` 反推并完全吻合：WE 按 300 DPI 栅格化（1 pt = 300/72 像素），框 = 行数 × (ascent + descent + leading) 和最宽一行，四周加 `padding`。
+- 支持项目字体、WE 自带字体、`systemfont_*`（中日文自动回退）、多行、`limitwidth` 换行、`limitrows` 行数限制和省略号、对齐。
+- **未验证的推断**：对齐与原点的关系文档没写，按真实布局推断为 right = 文字在原点左侧结束、top = 文字在原点上方；居中（最常见）不受影响。`opaquebackground` 和 MSDF 字体效果还没做（遇到时记一条说明）。
+
+**SceneScript**（Codex 按 `docs/specs/scene-script.md` 实现 `Sources/WEScript`，我审查并接入渲染器）：
+- JavaScriptCore；ES module 由词法转换处理；`engine`、`thisLayer`、`thisObject`、`thisScene`、`shared`、`input`、`localStorage`、`console`、WEMath/WEColor/Vec2-4、脚本属性（可绑定用户属性）、按脚本时间运行的定时器、鼠标和媒体事件；单个脚本出错只停用它自己。
+- 103 个真实脚本中 102 个能加载、101 个能跑完更新（失败的那个依赖 `createLayer`）；100 个脚本每帧约 0.28 ms。
+- 审查时改的：`localStorage` 改为最多每秒写一次盘（有脚本每帧都写）；`WEColor` 的色相改为 0–1（WE 文档写"normalized"，真实脚本也这么用；参考实现用的是度数）。
+- 接入：场景为每个对象保留可变的节点（变换、可见性），父对象被脚本移动时子对象跟着动；脚本可改文字及其排版、可见性、位置/缩放/角度、透明度、颜色、亮度、特效开关和特效常量（`thisObject` 即特效材质）。被改动的层只重写 uniform 模板（不重建管线），并跳过静态层缓存；被脚本隐藏的特效在渲染时跳过。
+- 离线渲染：`wecli render --clock yyyy-MM-ddTHH:mm:ss` 固定脚本看到的时间；回归脚本统一用固定时间（razer_bedroom 的霓虹灯是按时间变色的彩虹，之前参考图里是静态颜色）。
+- 还没做：粒子的 `instanceoverride`、`createLayer`/`destroyLayer`、`sortLayer`、纹理动画控制（现在给脚本一个单帧的替身）、媒体信息（现在没有"正在播放"事件，相关文字保持默认值）。
+
+**回归**：新增 `texttest`（2 例）和 `scripttest`（4 例：时钟和日期、绑定用户属性的脚本属性、移动带子对象的组、通过 `shared` 控制可见性、特效常量和特效开关、定时器），共 139 例。
+
+**结果**（深度检查，用户 16 个下载）：完全支持从 3 个（只有视频）增加到 10 个，场景 13 个里 7 个完全支持。剩下的缺口（用到 / 唯一缺口）：声音 5/2、粒子 2/0、SceneScript 2/1、视频纹理 1/0。"Persona 3 Reload 昼夜"画面整体放大的问题在脚本之前就存在，另查。
+
+
 ## 7. 待确认
 1. 最低系统版本：建议 macOS 14（SMAppService、ScreenCaptureKit 音频成熟）。
 2. 工程形态：目前采用 SwiftPM + 生成 .app 的脚本（§6.11）；到需要正式签名分发时，再考虑加一个 Xcode 工程来包装。

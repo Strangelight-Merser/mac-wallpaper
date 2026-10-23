@@ -1,0 +1,160 @@
+{
+ "general": {
+  "clearcolor": "0.08 0.09 0.12",
+  "orthogonalprojection": {
+   "width": 1024,
+   "height": 512
+  }
+ },
+ "objects": [
+  {
+   "id": 1,
+   "name": "clock",
+   "text": {
+    "script": "'use strict';\nexport var scriptProperties = createScriptProperties()\n    .addCheckbox({ name: 'seconds', label: 'Seconds', value: false })\n    .addText({ name: 'separator', label: 'Separator', value: ':' })\n    .finish();\nconst pad = n => ('0' + n).slice(-2);\nexport function update(value) {\n    const t = new Date();\n    let s = pad(t.getHours()) + scriptProperties.separator + pad(t.getMinutes());\n    if (scriptProperties.seconds) s += scriptProperties.separator + pad(t.getSeconds());\n    return s;\n}\n",
+    "scriptproperties": {
+     "seconds": {
+      "user": "showseconds",
+      "value": false
+     }
+    },
+    "value": "00:00"
+   },
+   "font": "fonts/RobotoMono-Regular.ttf",
+   "pointsize": 24,
+   "padding": 8,
+   "origin": "512 420 0",
+   "scale": "0.6 0.6 1",
+   "color": "1 0.8 0.3",
+   "visible": true
+  },
+  {
+   "id": 2,
+   "name": "group",
+   "origin": {
+    "script": "'use strict';\nimport * as WEMath from 'WEMath';\n// The group (with the date as its child) slides right over the first two seconds.\nexport function update(value) {\n    value.x = WEMath.mix(300, 700, WEMath.smoothStep(0, 2, engine.runtime));\n    return value;\n}\n",
+    "value": "300 300 0"
+   },
+   "visible": true
+  },
+  {
+   "id": 3,
+   "name": "date (in group)",
+   "text": {
+    "script": "'use strict';\nconst days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];\nexport function init() {\n    const t = new Date();\n    return days[t.getDay()] + ' ' + t.getFullYear() + '-' + (t.getMonth() + 1) + '-' + t.getDate();\n}\n",
+    "value": "date"
+   },
+   "font": "fonts/NotoSans-Regular.ttf",
+   "pointsize": 12,
+   "padding": 8,
+   "origin": "0 0 0",
+   "scale": "0.5 0.5 1",
+   "color": "0.7 0.85 1",
+   "visible": true,
+   "parent": 2
+  },
+  {
+   "id": 4,
+   "name": "shown by shared",
+   "text": "shown: another script set shared.hideWarning",
+   "font": "fonts/NotoSans-Regular.ttf",
+   "pointsize": 12,
+   "padding": 8,
+   "origin": "512 200 0",
+   "scale": "0.5 0.5 1",
+   "color": "0.5 1 0.6",
+   "visible": {
+    "script": "'use strict';\nexport function init() { shared.hideWarning = true; }\nexport function update(value) { return true; }\n",
+    "value": false
+   }
+  },
+  {
+   "id": 5,
+   "name": "hidden by shared",
+   "text": "this must stay hidden",
+   "font": "fonts/NotoSans-Regular.ttf",
+   "pointsize": 12,
+   "padding": 8,
+   "origin": "512 160 0",
+   "scale": "0.5 0.5 1",
+   "color": "1 0.3 0.3",
+   "visible": {
+    "script": "'use strict';\nexport function update(value) { return !shared.hideWarning; }\n",
+    "value": true
+   }
+  },
+  {
+   "id": 6,
+   "name": "tinted",
+   "text": "TINT",
+   "font": "fonts/NotoSans-Regular.ttf",
+   "pointsize": 20,
+   "padding": 16,
+   "origin": "180 100 0",
+   "scale": "0.5 0.5 1",
+   "color": "1 1 1",
+   "visible": true,
+   "effects": [
+    {
+     "file": "effects/tint/effect.json",
+     "visible": true,
+     "passes": [
+      {
+       "constantshadervalues": {
+        "alpha": 1,
+        "color": {
+         "script": "'use strict';\nimport * as WEColor from 'WEColor';\n// Hue from the time of day (12:34:56 -> 0.524), turning a little every second.\nexport function update(value) { return WEColor.hsv2rgb(new Vec3((engine.timeOfDay + engine.runtime * 0.1) % 1, 0.8, 1)); }\n",
+         "value": "1 0 0"
+        }
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": 7,
+   "name": "effect turned on",
+   "text": "ON AFTER 1S",
+   "font": "fonts/NotoSans-Regular.ttf",
+   "pointsize": 14,
+   "padding": 16,
+   "origin": "820 100 0",
+   "scale": "0.5 0.5 1",
+   "color": "1 1 1",
+   "visible": true,
+   "effects": [
+    {
+     "file": "effects/tint/effect.json",
+     "visible": {
+      "script": "'use strict';\nexport function update(value) { return engine.runtime > 1; }\n",
+      "value": false
+     },
+     "passes": [
+      {
+       "constantshadervalues": {
+        "alpha": 1,
+        "color": "0.2 0.6 1"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": 8,
+   "name": "timers",
+   "text": {
+    "script": "'use strict';\nlet n = 0;\nexport function init() { engine.setInterval(() => { n += 1; }, 500); }\nexport function update(value) { return 'ticks: ' + n + ' / ' + engine.canvasSize.x + 'x' + engine.canvasSize.y; }\n",
+    "value": "ticks"
+   },
+   "font": "fonts/NotoSans-Regular.ttf",
+   "pointsize": 12,
+   "padding": 8,
+   "origin": "512 40 0",
+   "scale": "0.5 0.5 1",
+   "color": "0.8 0.8 0.8",
+   "visible": true
+  }
+ ]
+}

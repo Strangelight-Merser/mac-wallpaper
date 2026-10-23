@@ -11,12 +11,12 @@ public struct TextObject {
     public var value: String
     /// `fonts/...` path (project or assets), or `systemfont_sansserif` / `_serif` / `_monospace`.
     public let font: String
-    public let pointSize: Float
-    public let padding: Float
-    public let horizontal: Align
-    public let vertical: Align
+    public internal(set) var pointSize: Float
+    public internal(set) var padding: Float
+    public internal(set) var horizontal: Align
+    public internal(set) var vertical: Align
     /// Wrap width in pixels when `limitwidth` is set.
-    public let maxWidth: Float?
+    public internal(set) var maxWidth: Float?
     /// Row limit when `limitrows` is set; overflow ends with "…" if `limituseellipsis`.
     public let maxRows: Int?
     public let ellipsis: Bool
@@ -28,18 +28,19 @@ public struct TextObject {
         func f(_ k: String, _ d: Float) -> Float { parseFloats(properties.resolve(o[k]))?.first ?? d }
         pointSize = f("pointsize", 32)
         padding = f("padding", 0)
-        func align(_ k: String, start: String, end: String) -> Align {
-            switch (properties.resolve(o[k]) as? String)?.lowercased() {
-            case start: .start
-            case end: .end
-            default: .center
-            }
-        }
-        horizontal = align("horizontalalign", start: "left", end: "right")
-        vertical = align("verticalalign", start: "top", end: "bottom")
+        horizontal = Self.align(properties.resolve(o["horizontalalign"]) as? String, start: "left", end: "right")
+        vertical = Self.align(properties.resolve(o["verticalalign"]) as? String, start: "top", end: "bottom")
         maxWidth = properties.bool(o["limitwidth"], default: false) ? f("maxwidth", 500) : nil
         maxRows = properties.bool(o["limitrows"], default: false) ? max(1, Int(f("maxrows", 1))) : nil
         ellipsis = properties.bool(o["limituseellipsis"], default: false)
+    }
+
+    static func align(_ value: String?, start: String, end: String) -> Align {
+        switch value?.lowercased() {
+        case start: .start
+        case end: .end
+        default: .center
+        }
     }
 
     /// WE rasterizes fonts at 300 DPI: one point is 300/72 scene pixels. Measured against the stored

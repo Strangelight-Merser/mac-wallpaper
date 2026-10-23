@@ -28,6 +28,7 @@ func usage() -> Never {
       wecli render  <wallpaper dir> --assets <WE assets dir> [--time t] [--size WxH] [--prop name=value]...
                     [--layers a,b] [--bloom off] [--cache off] [--warm t] [--target _rt_name] --out <out.png>
                     [--pointer x,y[:x2,y2]] [--press s] [--frames N] [--audio hz,hz[:hz,hz]]
+                    [--clock yyyy-MM-ddTHH:mm:ss]   wall-clock time scripts see (local time; default now)
                     pointer: 0…1, y down; with --frames, N frames at 30 fps ending at --time, the pointer
                     moving from x,y to x2,y2 (for simulations such as cursor ripples)
                     audio: spectrum of sine tones (left[:right], amplitude 0.25 each) for g_AudioSpectrum*
@@ -317,6 +318,12 @@ case "render":
             scene.onlyLayers = opts["--layers"].map { Set($0.split(separator: ",").map(String.init)) }
             scene.disableLayerCache = opts["--cache"] == "off"
             if let audio { scene.audio = audio }
+            if let clock = opts["--clock"] {
+                let f = DateFormatter()
+                f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+                guard let date = f.date(from: clock) else { fputs("invalid --clock \(clock)\n", stderr); exit(2) }
+                scene.scriptClock = date
+            }
         }
         // --warm t: render a frame at time t first, so the measured frame uses the layer caches.
         if let warm = opts["--warm"].flatMap(Float.init) { _ = try renderer.render(width: size[0], height: size[1], time: warm) }

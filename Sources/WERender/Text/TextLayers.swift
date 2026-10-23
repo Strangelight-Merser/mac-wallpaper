@@ -14,10 +14,19 @@ extension SceneRenderer {
         textOverrides[index] ?? scene.layers[index].text?.value
     }
 
+    /// The layer's text settings, including changes made by scripts.
+    func textObject(_ index: Int) -> TextObject? { textObjectOverrides[index] ?? scene.layers[index].text }
+
+    /// Scripts changed layout settings: lay the text out again on the next frame.
+    func setTextObject(_ object: TextObject, layer index: Int) {
+        textObjectOverrides[index] = object
+        textStates[index] = nil
+    }
+
     /// Re-renders text layers whose string changed and resizes their boxes. Call before any layer renders.
     func updateTextLayers() {
         for i in scene.layers.indices {
-            guard let object = scene.layers[i].text, let string = currentText(i) else { continue }
+            guard let object = textObject(i), let string = currentText(i) else { continue }
             var state = textStates[i] ?? TextLayerState(rasterizer: TextRasterizer(object, locator: locator))
             guard state.string != string else { continue }
             let raster = state.rasterizer.render(string)
@@ -49,7 +58,7 @@ extension SceneRenderer {
 
     /// Box centre relative to the text object's origin (object space).
     func textOffset(_ index: Int) -> SIMD3<Float> {
-        guard let object = scene.layers[index].text, let state = textStates[index] else { return .zero }
+        guard let object = textObject(index), let state = textStates[index] else { return .zero }
         let o = object.boxOffset(state.size)
         return SIMD3(o.x, o.y, 0)
     }
