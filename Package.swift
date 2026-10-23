@@ -16,7 +16,7 @@ let package = Package(
         .target(name: "WEScript", resources: [.process("Runtime.js")], linkerSettings: [.linkedFramework("JavaScriptCore")]),
         .testTarget(name: "WEScriptTests", dependencies: ["WEScript"]),
         .target(name: "WEFormat"),
-        .target(name: "WELibrary", dependencies: ["WEFormat", "WERender", "WEVideo"]),
+        .target(name: "WELibrary", dependencies: ["WEFormat", "WERender", "WEVideo", "WESteam"]),
         .testTarget(name: "WELibraryTests", dependencies: ["WELibrary", "WEFormat", "WEShader", "WERender"]),
         // glslang 16.6.0 + SPIRV-Cross vulkan-sdk-1.4.363.0 (git submodules in ThirdParty/, reached through
         // symlinks) compiled in-process, behind a small C API (include/shader_tools.h).

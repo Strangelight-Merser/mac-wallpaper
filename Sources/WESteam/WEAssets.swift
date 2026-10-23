@@ -52,15 +52,15 @@ public enum WEAssetsUpdate: Sendable {
     case available(plan: WEAssetsPlan, changedBytes: Int64, changedDiskBytes: Int64)
 }
 
-struct WEAssetsReceipt: Codable, Sendable, Equatable {
+public struct WEAssetsReceipt: Codable, Sendable, Equatable {
     struct File: Codable, Sendable, Equatable {
         let path: String
         let sha: Data
     }
     let depotID: UInt32
     let manifestID: UInt64
-    let buildID: UInt64
-    let depots: [WEAssetsDepot]
+    public let buildID: UInt64
+    public let depots: [WEAssetsDepot]
     let files: Int
     let bytes: Int64
     let networkBytes: Int64
