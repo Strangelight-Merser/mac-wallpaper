@@ -98,6 +98,9 @@ public enum ShaderPreprocessor {
     public static func scan(_ src: String) -> (combos: [String: Int], uniforms: [UniformAnnotation]) {
         var combos: [String: Int] = [:]
         var uniforms: [UniformAnnotation] = []
+        // Many WE shaders have CRLF line ends, and Swift treats "\r\n" as one Character, so splitting on "\n"
+        // would see a single line: every annotation (e.g. the MASK combo a mask texture turns on) was lost.
+        let src = src.replacingOccurrences(of: "\r\n", with: "\n")
         for line in src.split(separator: "\n", omittingEmptySubsequences: false) {
             let l = String(line)
             if let r = l.range(of: "[COMBO]"), let j = jsonObject(String(l[r.upperBound...])),
