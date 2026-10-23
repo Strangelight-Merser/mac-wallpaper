@@ -162,14 +162,24 @@ enum ParticleOperator {
 
 struct ParticleRenderStyle {
     let trail: Bool
+    let rope: Bool
+    let segments, subdivision: Int
+    let uvScale: Float
+    let uvScrolling, uvSmoothing, fadeAlpha, fadeSize: Bool
     let length, maxLength, minLength: Float
     init(_ v: ParticleValues) {
         trail = (v.data["name"] as? String) == "spritetrail"
-        length = v.f("length", 0.05); maxLength = v.f("maxlength", 10); minLength = v.f("minlength", 0)
+        rope = (v.data["name"] as? String) == "ropetrail"
+        segments = max(2, Int(v.f("segments", 4)))
+        subdivision = max(1, Int(v.f("subdivision", 1)))
+        uvScale = max(0.0001, v.f("uvscale", 1))
+        uvScrolling = v.b("uvscrolling", false); uvSmoothing = v.b("uvsmoothing")
+        fadeAlpha = v.b("fadealpha", false); fadeSize = v.b("fadesize", false)
+        length = max(0.0001, v.f("length", rope ? 1 : 0.05)); maxLength = v.f("maxlength", 10); minLength = v.f("minlength", 0)
     }
 }
 
-/// A particle object and its static children, with resolved user properties and material passes.
+/// A particle object and its static or event children, with resolved user properties and material passes.
 public struct ParticleSystemDescription {
     public let id: Int
     public let name: String
@@ -186,6 +196,12 @@ public struct ParticleSystemDescription {
     public let notes: [String]
     /// Whether this system has a supported renderer and material.
     public var canRender: Bool { !renderers.isEmpty && !passes.isEmpty }
+    enum ChildType: String { case `static`, eventfollow, eventspawn, eventdeath }
+    let childType: ChildType
+    let eventMaxCount: Int
+    let probability: Float
+    let ownOverrideNames: Set<String>
+    let baseMaxCount: Int
     let flags: Int
     let seed: UInt64
     let parentTransform: simd_float4x4
@@ -212,6 +228,10 @@ public struct ParticleSystemDescription {
         let obj = ParticleValues(object, properties)
         let name = object["name"] as? String ?? "?"
         self.name = name
+        childType = ChildType(rawValue: object["type"] as? String ?? "static") ?? .static
+        eventMaxCount = max(0, Int(obj.f("maxcount", 20)))
+        probability = max(0, min(1, obj.f("probability", 1)))
+        ownOverrideNames = Set(object["_ownOverrideNames"] as? [String] ?? [])
         id = Int(obj.f("id", -1)); visible = obj.b("visible")
         origin = obj.v("origin", .zero); angles = obj.v("angles", .zero); scale = obj.v("scale", .one)
         let depth = obj.v("parallaxDepth", .zero); parallaxDepth = [depth.x, depth.y]
@@ -229,7 +249,8 @@ public struct ParticleSystemDescription {
         let v = ParticleValues(definition, properties)
         let ov = ParticleValues(object["instanceoverride"] as? [String: Any] ?? [:], properties)
         overrides = ParticleOverrides(ov)
-        maxCount = max(0, Int(v.f("maxcount", 100) * overrides.count))
+        baseMaxCount = max(0, Int(v.f("maxcount", 100)))
+        maxCount = max(0, Int(Float(baseMaxCount) * overrides.count))
         startTime = max(0, v.f("starttime", 0)); flags = Int(v.f("flags", 0))
         animationMode = definition["animationmode"] as? String ?? "sequence"
         sequenceMultiplier = v.f("sequencemultiplier", 1)
@@ -253,7 +274,7 @@ public struct ParticleSystemDescription {
         let styles = definition["renderer"] as? [[String: Any]] ?? []
         renderers = (styles.isEmpty ? [["name": "sprite"]] : styles).compactMap { d in
             let n = d["name"] as? String ?? "sprite"
-            guard n == "sprite" || n == "spritetrail" else { unsupported("renderer", n); return nil }
+            guard n == "sprite" || n == "spritetrail" || n == "ropetrail" else { unsupported("renderer", n); return nil }
             return ParticleRenderStyle(ParticleValues(d, properties))
         }
         var points = (definition["controlpoint"] as? [[String: Any]] ?? []).map { d -> ParticleControlPoint in
@@ -272,10 +293,12 @@ public struct ParticleSystemDescription {
             }
         }
         controlPoints = points
+        let ropeOnly = !renderers.isEmpty && renderers.allSatisfy { $0.rope }
         if let path = definition["material"] as? String {
             passes = (try locator.json(path)["passes"] as? [[String: Any]] ?? []).compactMap { d in
-                let p = SceneDescription.Pass(material: d, label: name)
-                guard p.shader == "genericparticle" else { unsupported("shader", p.shader); return nil }
+                var p = SceneDescription.Pass(material: d, label: name)
+                guard p.shader == "genericparticle" || p.shader == "genericropeparticle" else { unsupported("shader", p.shader); return nil }
+                if ropeOnly { p.shader = "genericropeparticle" }
                 return p
             }
         } else { passes = []; notes.append("\(name): no material") }
@@ -283,7 +306,7 @@ public struct ParticleSystemDescription {
         let transform = parent * particleTransform(origin: origin, angles: angles, scale: scale)
         for var child in definition["children"] as? [[String: Any]] ?? [] {
             let type = child["type"] as? String ?? "static"
-            guard type == "static" else { unsupported("event child", type); continue }
+            guard ChildType(rawValue: type) != nil else { unsupported("event child", type); continue }
             child["id"] = id
             // WE child entries name their definition file in "name" (e.g. "particles/presets/emberglow.json").
             if child["particle"] == nil, let file = child["name"] as? String, file.lowercased().hasSuffix(".json") {
@@ -293,6 +316,7 @@ public struct ParticleSystemDescription {
             child["visible"] = visible && properties.bool(child["visible"])
             child["parallaxDepth"] = object["parallaxDepth"]
             let inheritedOverrides = (object["instanceoverride"] as? [String: Any] ?? [:]).filter { !$0.key.hasPrefix("controlpoint") }
+            child["_ownOverrideNames"] = Array((child["instanceoverride"] as? [String: Any] ?? [:]).keys)
             child["instanceoverride"] = inheritedOverrides.merging(child["instanceoverride"] as? [String: Any] ?? [:]) { _, value in value }
             let cv = ParticleValues(child, properties)
             let local = particleTransform(origin: cv.v("origin", .zero), angles: cv.v("angles", .zero), scale: cv.v("scale", .one))

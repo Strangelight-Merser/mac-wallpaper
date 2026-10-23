@@ -180,6 +180,12 @@ extension SceneRenderer: SceneScriptHost {
     public var objectIDs: [Int] { scene.nodeOrder }
 
     public func value(object id: Int, property: String) -> ScriptValue? {
+        if property.hasPrefix("instanceoverride."),
+           let index = scene.particles.firstIndex(where: { $0.id == id }),
+           let values = particleState(index).simulation.overrideValue(String(property.dropFirst("instanceoverride.".count))) {
+            if values.count == 1 { return .number(Double(values[0])) }
+            return .vec3(SIMD3(Double(values[0]), Double(values[1]), Double(values[2])))
+        }
         let layerIndex = layerIndexByID[id]
         let layer = layerIndex.map { scene.layers[$0] }
         func v3(_ v: SIMD3<Float>) -> ScriptValue { .vec3(SIMD3(Double(v.x), Double(v.y), Double(v.z))) }
@@ -280,7 +286,9 @@ extension SceneRenderer: SceneScriptHost {
         default: break
         }
         if property.hasPrefix("instanceoverride.") {
-            warnOnce("SceneScript: particle instance overrides from scripts are not supported yet"); return
+            if let index = scene.particles.firstIndex(where: { $0.id == id }), let values = Self.floats(value),
+               particleState(index).simulation.setOverride(String(property.dropFirst("instanceoverride.".count)), values) { return }
+            warnOnce("SceneScript: setting \(property) is not supported yet"); return
         }
         if let i = layerIndex, let (slot, rest) = Self.parseEffectPath(property) {
             // Effects hidden in scene.json (and not script-controlled) were never loaded: nothing to change.
