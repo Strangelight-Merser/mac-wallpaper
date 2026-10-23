@@ -29,9 +29,13 @@ public struct WorkshopItem: Sendable, Codable, Equatable {
     public func previewURL(width: Int = 320, height: Int = 180) -> URL? {
         guard width > 0, height > 0, let previewURL,
               var url = URLComponents(url: previewURL, resolvingAgainstBaseURL: false) else { return nil }
-        var query = (url.queryItems ?? []).filter { !["imw", "imh", "ima", "impolicy"].contains($0.name) }
+        // Steam's image CDN ignores imw/imh unless impolicy=Letterbox; letterbox=false keeps the aspect ratio
+        // without padding. Animated GIFs are never resized (see WorkshopImage, which reads only their first frame).
+        let names = ["imw", "imh", "ima", "impolicy", "imcolor", "letterbox"]
+        var query = (url.queryItems ?? []).filter { !names.contains($0.name) }
         query += [URLQueryItem(name: "imw", value: String(width)), URLQueryItem(name: "imh", value: String(height)),
-                  URLQueryItem(name: "ima", value: "fit")]
+                  URLQueryItem(name: "ima", value: "fit"), URLQueryItem(name: "impolicy", value: "Letterbox"),
+                  URLQueryItem(name: "imcolor", value: "#000000"), URLQueryItem(name: "letterbox", value: "false")]
         url.queryItems = query
         return url.url
     }

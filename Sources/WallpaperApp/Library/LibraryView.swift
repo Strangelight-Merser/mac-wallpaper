@@ -10,6 +10,8 @@ struct LibraryView: View {
     let browse: WorkshopBrowseModel
     @State private var downloadsShown = false
 
+    private var browsing: Bool { model.section == .workshopBrowse }
+
     var body: some View {
         NavigationSplitView {
             Sidebar(model: model, steam: steam)
@@ -29,7 +31,15 @@ struct LibraryView: View {
                     }
             }
         }
-        .searchable(text: $model.search, placement: .toolbar, prompt: Text("Search titles and tags"))
+        // One search field: it searches the Workshop while browsing it, the library otherwise.
+        .searchable(text: browsing ? Bindable(browse).search : $model.search, placement: .toolbar,
+                    prompt: browsing ? Text("Search the Workshop") : Text("Search titles and tags"))
+        .onSubmit(of: .search) { if browsing { browse.reload() } }
+        .onChange(of: browse.search) { old, new in
+            // Clearing the search returns to the chosen sort order.
+            if browsing, new.isEmpty, !old.isEmpty { browse.reload() }
+        }
+        .onChange(of: model.showMature) { if browse.loaded { browse.reload() } }
         .sheet(isPresented: $steam.loginSheetShown) { SteamLoginSheet(steam: steam) }
         .sheet(isPresented: $steam.importSheetShown) { ImportSheet(steam: steam) }
         .sheet(isPresented: $assets.sheetShown) { AssetsSheet(assets: assets, steam: steam) }
@@ -59,24 +69,26 @@ struct LibraryView: View {
                     .popover(isPresented: $downloadsShown, arrowEdge: .bottom) { DownloadsPopover(queue: steam.queue) }
                 }
                 Menu {
-                    Picker(selection: $model.sort) {
-                        Text("Recently Modified").tag(LibrarySort.recent)
-                        Text("Title").tag(LibrarySort.title)
-                        Text("Size").tag(LibrarySort.size)
-                    } label: { Text("Sort By") }
-                    .pickerStyle(.inline)
-                    Divider()
-                    Toggle(isOn: $model.onlyRunnable) { Text("Only Wallpapers That Run on Mac") }
+                    if !browsing {
+                        Picker(selection: $model.sort) {
+                            Text("Recently Modified").tag(LibrarySort.recent)
+                            Text("Title").tag(LibrarySort.title)
+                            Text("Size").tag(LibrarySort.size)
+                        } label: { Text("Sort By") }
+                        .pickerStyle(.inline)
+                        Divider()
+                        Toggle(isOn: $model.onlyRunnable) { Text("Only Wallpapers That Run on Mac") }
+                    }
                     Toggle(isOn: $model.showMature) { Text("Show Questionable and Mature") }
                 } label: {
                     Label { Text("View Options") } icon: { Image(systemName: "line.3.horizontal.decrease.circle") }
                 }
                 Button {
-                    Task { await model.refresh() }
+                    if browsing { browse.reload() } else { Task { await model.refresh() } }
                 } label: {
                     Label { Text("Refresh") } icon: { Image(systemName: "arrow.clockwise") }
                 }
-                .disabled(model.isRefreshing)
+                .disabled(browsing ? browse.state == .loading : model.isRefreshing)
                 Button {
                     model.inspectorShown.toggle()
                 } label: {
@@ -95,15 +107,10 @@ private struct Sidebar: View {
         List(selection: $model.section) {
             Section {
                 if let account = steam.account {
-                    Menu {
-                        Button { steam.showImport() } label: { Text("Import Subscriptions…") }
-                        Divider()
-                        Button(role: .destructive) { steam.signOut() } label: { Text("Log Out") }
-                    } label: {
-                        Label { Text(account.accountName) } icon: { Image(systemName: "person.crop.circle.fill") }
-                    }
-                    .menuStyle(.borderlessButton)
-                    .menuIndicator(.hidden)
+                    // A Menu as the row itself draws dimmed in a sidebar: a plain row with a context menu, and the
+                    // same actions behind "…" in the section header.
+                    Label { Text(account.accountName) } icon: { Image(systemName: "person.crop.circle.fill") }
+                        .contextMenu { accountActions }
                     .help(Text("Logged in to Steam"))
                     if !steam.pendingUpdates.isEmpty {
                         Button { steam.installUpdates() } label: {
@@ -132,7 +139,20 @@ private struct Sidebar: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-            } header: { Text("Steam") }
+            } header: {
+                HStack {
+                    Text("Steam")
+                    Spacer()
+                    if steam.account != nil {
+                        Menu { accountActions } label: { Image(systemName: "ellipsis.circle") }
+                            .menuStyle(.button)
+                            .buttonStyle(.borderless)
+                            .menuIndicator(.hidden)
+                            .fixedSize()
+                            .help(Text("Steam Account"))
+                    }
+                }
+            }
             Section {
                 row(.all, Text("All Wallpapers"), "square.grid.2x2")
                 ForEach([WallpaperType.scene, .video, .web], id: \.self) { type in
@@ -167,6 +187,12 @@ private struct Sidebar: View {
             }
             .padding(10)
         }
+    }
+
+    @ViewBuilder private var accountActions: some View {
+        Button { steam.showImport() } label: { Text("Import Subscriptions…") }
+        Divider()
+        Button(role: .destructive) { steam.signOut() } label: { Text("Log Out") }
     }
 
     private func row(_ section: LibrarySection, _ title: Text, _ symbol: String) -> some View {

@@ -45,6 +45,8 @@ final class WorkshopBrowseModel {
     init(steam: SteamModel, library: LibraryModel) { self.steam = steam; self.library = library }
 
     var selected: WorkshopItem? { items.first { $0.id == selection } }
+    /// A first page was requested (so a filter change should reload).
+    var loaded: Bool { !items.isEmpty || state != .idle }
     var canLoadMore: Bool { cursor != nil && state == .idle }
 
     /// Starts over with the current sort, kind, search and maturity setting.
@@ -81,6 +83,7 @@ final class WorkshopBrowseModel {
                 if subscribed.isEmpty { subscribed = Set(steam.subscriptions.map(\.id)) }
             } catch {
                 guard generation == self.generation else { return }
+                log("workshop query: \(error)")
                 state = .failed(SteamModel.message(error))
             }
         }
@@ -145,10 +148,6 @@ struct WorkshopBrowseView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
-                TextField(text: $browse.search) { Text("Search the Workshop") }
-                    .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 260)
-                    .onSubmit { browse.reload() }
                 Picker(selection: $browse.sort) {
                     ForEach(WorkshopBrowseModel.Sort.allCases) { $0.label.tag($0) }
                 } label: { Text("Sort By") }
@@ -179,6 +178,7 @@ struct WorkshopBrowseView: View {
                 } description: { Text(message) } actions: {
                     Button { browse.reload() } label: { Text("Try Again") }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             case .loading, .idle:
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -210,7 +210,7 @@ private struct WorkshopCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            WorkshopImage(url: item.previewURL(width: 384, height: 216), symbol: item.kind?.symbol ?? "photo")
+            WorkshopImage(url: item.previewURL(width: 400, height: 400), symbol: item.kind?.symbol ?? "photo")
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .overlay(alignment: .topTrailing) {
                     if inLibrary || subscribed {
@@ -237,25 +237,128 @@ private struct WorkshopCard: View {
     }
 }
 
-/// A 16:9 preview loaded on demand.
+/// A 16:9 still preview loaded on demand.
 struct WorkshopImage: View {
     let url: URL?
     let symbol: String
+    @State private var image: CGImage?
 
     var body: some View {
         Rectangle()
             .fill(.quaternary)
             .aspectRatio(16 / 9, contentMode: .fit)
             .overlay {
-                AsyncImage(url: url) { phase in
-                    if let image = phase.image {
-                        image.resizable().aspectRatio(contentMode: .fill)
-                    } else {
-                        Image(systemName: symbol).font(.largeTitle).foregroundStyle(.tertiary)
-                    }
+                if let image {
+                    Image(decorative: image, scale: 1).resizable().aspectRatio(contentMode: .fill)
+                } else {
+                    Image(systemName: symbol).font(.largeTitle).foregroundStyle(.tertiary)
                 }
             }
             .clipped()
+            .task(id: url) {
+                image = nil
+                if let url { image = await WorkshopPreviews.shared.image(url) }
+            }
+    }
+}
+
+/// Workshop previews as still images, for as little data as possible (the user's data is limited): JPEG and PNG
+/// previews come as small renditions (`WorkshopItem.previewURL(width:height:)`); animated GIFs, which Steam never
+/// resizes and often weigh a megabyte, are read in ranges only until their first frame is complete.
+actor WorkshopPreviews {
+    static let shared = WorkshopPreviews()
+    private let cache = NSCache<NSURL, CGImage>()
+    private var loading: [URL: Task<CGImage?, Never>] = [:]
+    private static let step = 64 * 1024, limit = 512 * 1024
+
+    init() { cache.countLimit = 400 }
+
+    func image(_ url: URL) async -> CGImage? {
+        if let image = cache.object(forKey: url as NSURL) { return image }
+        if let task = loading[url] { return await task.value }
+        let task = Task { await Self.load(url) }
+        loading[url] = task
+        let image = await task.value
+        loading[url] = nil
+        if let image { cache.setObject(image, forKey: url as NSURL) }
+        return image
+    }
+
+    private static func load(_ url: URL) async -> CGImage? {
+        var data = Data()
+        while true {
+            var request = URLRequest(url: url)
+            request.setValue("bytes=\(data.count)-\(data.count + step - 1)", forHTTPHeaderField: "Range")
+            guard let (chunk, response) = try? await URLSession.shared.data(for: request),
+                  let http = response as? HTTPURLResponse else { return nil }
+            let complete: Bool
+            switch http.statusCode {
+            case 206:
+                data += chunk
+                // Content-Range: bytes <first>-<last>/<total>
+                let total = http.value(forHTTPHeaderField: "Content-Range")?.split(separator: "/").last.flatMap { Int($0) }
+                complete = total.map { data.count >= $0 } ?? (chunk.count < step)
+            case 200: data = chunk; complete = true  // the server sent the whole file
+            case 416: complete = true                // the previous range ended exactly at the end
+            default: return nil
+            }
+            if complete || data.count >= limit {
+                return CGImageSourceCreateWithData(data as CFData, nil).flatMap { CGImageSourceCreateImageAtIndex($0, 0, nil) }
+            }
+            // A GIF cut after a frame plus a trailer byte is a complete GIF. Some start on a blank frame (a fade
+            // in): then the latest frame in the bytes at hand, or in the next range.
+            let ends = gifFrameEnds(data)
+            if let end = ends.last {
+                let image = CGImageSourceCreateWithData((data.prefix(end) + [0x3B]) as CFData, nil)
+                    .flatMap { CGImageSourceCreateImageAtIndex($0, ends.count - 1, nil) }
+                if let image, !isBlank(image) || data.count + step > limit { return image }
+            }
+            if Task.isCancelled { return nil }
+        }
+    }
+
+    /// Where each complete image's data ends in a (partial) GIF; empty if it isn't a GIF or no frame is
+    /// complete yet (GIF89a: header, logical screen descriptor, color table, then extension and image blocks).
+    static func gifFrameEnds(_ data: Data) -> [Int] {
+        let b = [UInt8](data)
+        guard b.count >= 13, b.starts(with: Array("GIF8".utf8)) else { return [] }
+        var pos = 13 + (b[10] & 0x80 != 0 ? 3 << ((Int(b[10]) & 7) + 1) : 0)
+        var ends: [Int] = []
+        func skipSubBlocks() -> Bool {
+            while pos < b.count {
+                let size = Int(b[pos]); pos += 1
+                if size == 0 { return true }
+                pos += size
+            }
+            return false
+        }
+        while pos < b.count {
+            switch b[pos] {
+            case 0x21:  // extension: label, then sub-blocks
+                pos += 2
+                guard skipSubBlocks() else { return ends }
+            case 0x2C:  // image descriptor (10 bytes), local color table, LZW code size, data sub-blocks
+                guard pos + 10 <= b.count else { return ends }
+                let flags = Int(b[pos + 9])
+                pos += 10 + (flags & 0x80 != 0 ? 3 << ((flags & 7) + 1) : 0) + 1
+                guard skipSubBlocks() else { return ends }
+                ends.append(pos)
+            default:
+                return ends
+            }
+        }
+        return ends
+    }
+
+    /// Nearly one flat color (judged from an 8×8 thumbnail).
+    static func isBlank(_ image: CGImage) -> Bool {
+        var pixels = [UInt8](repeating: 0, count: 8 * 8 * 4)
+        guard let context = CGContext(data: &pixels, width: 8, height: 8, bitsPerComponent: 8, bytesPerRow: 32,
+                                      space: CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+        context.draw(image, in: CGRect(x: 0, y: 0, width: 8, height: 8))
+        let luma = stride(from: 0, to: pixels.count, by: 4).map { Int(pixels[$0]) * 3 + Int(pixels[$0 + 1]) * 6 + Int(pixels[$0 + 2]) }
+        return (luma.max() ?? 0) - (luma.min() ?? 0) < 60
     }
 }
 
@@ -267,7 +370,7 @@ struct WorkshopInspector: View {
         if let item = browse.selected {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    WorkshopImage(url: item.previewURL(width: 640, height: 360), symbol: item.kind?.symbol ?? "photo")
+                    WorkshopImage(url: item.previewURL(width: 640, height: 640), symbol: item.kind?.symbol ?? "photo")
                         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                     VStack(alignment: .leading, spacing: 6) {
                         Text(item.title).font(.title3.weight(.semibold)).textSelection(.enabled)

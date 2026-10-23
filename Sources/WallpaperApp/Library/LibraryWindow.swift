@@ -7,10 +7,12 @@ import SwiftUI
 final class LibraryWindowController: NSWindowController, NSWindowDelegate {
     let model: LibraryModel
     let steam: SteamModel
+    let browse: WorkshopBrowseModel
 
     init(model: LibraryModel, steam: SteamModel, assets: AssetsModel, setup: SetupModel, browse: WorkshopBrowseModel) {
         self.model = model
         self.steam = steam
+        self.browse = browse
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1180, height: 760),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                               backing: .buffered, defer: false)
@@ -48,8 +50,18 @@ final class LibraryWindowController: NSWindowController, NSWindowDelegate {
                 }
                 // MW_LIBRARY_SHOW=login opens the Steam login sheet (captured as <file>-sheet.png).
                 if env["MW_LIBRARY_SHOW"] == "login" { self?.steam.showLogin() }
+                // MW_LIBRARY_SHOW=browse opens Browse the Workshop (MW_LIBRARY_SELECT then picks the first result).
+                if env["MW_LIBRARY_SHOW"] == "browse" {
+                    self?.model.section = .workshopBrowse
+                    // MW_BROWSE_SEARCH=<text> runs a Workshop search.
+                    if let text = env["MW_BROWSE_SEARCH"] { self?.browse.search = text; self?.browse.reload() }
+                }
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 7) { [weak self] in self?.snapshot(to: URL(fileURLWithPath: path)) }
+            if env["MW_LIBRARY_SHOW"] == "browse", env["MW_LIBRARY_SELECT"] != nil {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 12) { [weak self] in self?.browse.selection = self?.browse.items.first?.id }
+            }
+            let delay: Double = env["MW_LIBRARY_SHOW"] == "browse" ? 16 : 7
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in self?.snapshot(to: URL(fileURLWithPath: path)) }
         }
     }
 

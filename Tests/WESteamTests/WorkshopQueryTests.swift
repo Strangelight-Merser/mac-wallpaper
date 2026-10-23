@@ -52,6 +52,7 @@ final class WorkshopQueryTests: XCTestCase {
         let parts = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
         XCTAssertEqual(parts.queryItems?.filter { $0.name == "imw" }.map(\.value), ["320"])
         XCTAssertTrue(parts.queryItems?.contains(URLQueryItem(name: "ima", value: "fit")) == true)
+        XCTAssertTrue(parts.queryItems?.contains(URLQueryItem(name: "impolicy", value: "Letterbox")) == true)
         XCTAssertTrue(parts.queryItems?.contains(URLQueryItem(name: "token", value: "x")) == true)
         XCTAssertEqual(parts.fragment, "end"); XCTAssertNil(value.previewURL(width: 0, height: 180))
         let data = try JSONEncoder().encode(value)
