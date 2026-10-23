@@ -92,7 +92,7 @@ let package = Package(
         .target(name: "WERender", dependencies: ["WEFormat", "WEShader", "WEVideo", "WEAudio"]),
         .executableTarget(name: "wecli", dependencies: ["WEFormat", "WERender", "WEShader", "WEWeb", "WEAudio", "WESteam", "WELibrary"]),
         // Localized strings live in Resources/*.lproj and are copied into the .app by scripts/build.sh.
-        .executableTarget(name: "WallpaperApp", dependencies: ["WERender", "WEWeb", "WEAudio", "WELibrary"],
+        .executableTarget(name: "WallpaperApp", dependencies: ["WERender", "WEWeb", "WEAudio", "WELibrary", "WESteam"],
                           exclude: ["Resources"]),
         // Compiles .metal files through MTLDevice.makeLibrary (used by scripts/shader_batch.py).
         .executableTarget(name: "metalcheck", path: "tools", sources: ["metalcheck.swift"]),

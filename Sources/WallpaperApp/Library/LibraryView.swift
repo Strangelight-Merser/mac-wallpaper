@@ -4,10 +4,12 @@ import WELibrary
 /// Sidebar (types and sources), wallpaper grid, inspector.
 struct LibraryView: View {
     @Bindable var model: LibraryModel
+    @Bindable var steam: SteamModel
+    @State private var downloadsShown = false
 
     var body: some View {
         NavigationSplitView {
-            Sidebar(model: model)
+            Sidebar(model: model, steam: steam)
                 .navigationSplitViewColumnWidth(min: 180, ideal: 210, max: 280)
         } detail: {
             WallpaperGrid(model: model)
@@ -17,8 +19,26 @@ struct LibraryView: View {
                 }
         }
         .searchable(text: $model.search, placement: .toolbar, prompt: Text("Search titles and tags"))
+        .sheet(isPresented: $steam.loginSheetShown) { SteamLoginSheet(steam: steam) }
+        .sheet(isPresented: $steam.importSheetShown) { ImportSheet(steam: steam) }
+        .onAppear { steam.loadAccount() }
         .toolbar {
             ToolbarItemGroup {
+                if !steam.queue.downloads.isEmpty {
+                    Button { downloadsShown.toggle() } label: {
+                        Label {
+                            Text("Downloads")
+                        } icon: {
+                            if steam.queue.activeCount > 0 {
+                                ProgressView(value: steam.queue.progress).progressViewStyle(.circular).controlSize(.small)
+                            } else {
+                                Image(systemName: "arrow.down.circle")
+                            }
+                        }
+                    }
+                    .help(Text("Downloads"))
+                    .popover(isPresented: $downloadsShown, arrowEdge: .bottom) { DownloadsPopover(queue: steam.queue) }
+                }
                 Menu {
                     Picker(selection: $model.sort) {
                         Text("Recently Modified").tag(LibrarySort.recent)
@@ -50,9 +70,29 @@ struct LibraryView: View {
 
 private struct Sidebar: View {
     @Bindable var model: LibraryModel
+    let steam: SteamModel
 
     var body: some View {
         List(selection: $model.section) {
+            Section {
+                if let account = steam.account {
+                    Menu {
+                        Button { steam.showImport() } label: { Text("Import Subscriptions…") }
+                        Divider()
+                        Button(role: .destructive) { steam.signOut() } label: { Text("Log Out") }
+                    } label: {
+                        Label { Text(account.accountName) } icon: { Image(systemName: "person.crop.circle.fill") }
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .help(Text("Logged in to Steam"))
+                } else {
+                    Button { steam.showLogin() } label: {
+                        Label { Text("Log In to Steam…") } icon: { Image(systemName: "person.crop.circle.badge.plus") }
+                    }
+                    .buttonStyle(.plain)
+                }
+            } header: { Text("Steam") }
             Section {
                 row(.all, Text("All Wallpapers"), "square.grid.2x2")
                 ForEach([WallpaperType.scene, .video, .web], id: \.self) { type in

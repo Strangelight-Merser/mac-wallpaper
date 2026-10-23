@@ -23,7 +23,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         return model
     }()
-    lazy var libraryWindow = LibraryWindowController(model: libraryModel)
+    lazy var steamModel = SteamModel(library: libraryModel)
+    lazy var libraryWindow = LibraryWindowController(model: libraryModel, steam: steamModel)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         applyCommandLine()

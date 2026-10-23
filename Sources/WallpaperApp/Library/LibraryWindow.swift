@@ -6,9 +6,11 @@ import SwiftUI
 @MainActor
 final class LibraryWindowController: NSWindowController, NSWindowDelegate {
     let model: LibraryModel
+    let steam: SteamModel
 
-    init(model: LibraryModel) {
+    init(model: LibraryModel, steam: SteamModel) {
         self.model = model
+        self.steam = steam
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1180, height: 760),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                               backing: .buffered, defer: false)
@@ -16,7 +18,7 @@ final class LibraryWindowController: NSWindowController, NSWindowDelegate {
         window.minSize = NSSize(width: 820, height: 520)
         window.toolbarStyle = .unified
         window.isReleasedWhenClosed = false
-        let hosting = NSHostingController(rootView: LibraryView(model: model))
+        let hosting = NSHostingController(rootView: LibraryView(model: model, steam: steam))
         // Otherwise the hosting controller shrinks the window to the content's minimum size.
         hosting.sizingOptions = []
         window.contentViewController = hosting
@@ -44,16 +46,24 @@ final class LibraryWindowController: NSWindowController, NSWindowDelegate {
                 if let title = env["MW_LIBRARY_SELECT"] {
                     self?.model.selection = self?.model.entries.first { $0.title.localizedCaseInsensitiveContains(title) }?.id
                 }
+                // MW_LIBRARY_SHOW=login opens the Steam login sheet (captured as <file>-sheet.png).
+                if env["MW_LIBRARY_SHOW"] == "login" { self?.steam.showLogin() }
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 7) { [weak self] in self?.snapshot(to: URL(fileURLWithPath: path)) }
         }
     }
 
     func snapshot(to url: URL) {
-        guard let view = window?.contentView?.superview ?? window?.contentView,
-              let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
-        view.cacheDisplay(in: view.bounds, to: rep)
-        try? rep.representation(using: .png, properties: [:])?.write(to: url)
+        func write(_ window: NSWindow?, _ url: URL) {
+            guard let view = window?.contentView?.superview ?? window?.contentView,
+                  let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
+            view.cacheDisplay(in: view.bounds, to: rep)
+            try? rep.representation(using: .png, properties: [:])?.write(to: url)
+        }
+        if let sheet = window?.attachedSheet {
+            write(sheet, url.deletingPathExtension().appendingPathExtension("sheet.png"))
+        }
+        write(window, url)
     }
 
     func windowWillClose(_ notification: Notification) {
