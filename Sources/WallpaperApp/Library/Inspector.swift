@@ -296,7 +296,8 @@ private struct PropertyRow: View {
             .toggleStyle(.switch).controlSize(.small)
         case .slider(let min, let max, let step, let precision, let fraction):
             let number = Double(value ?? "") ?? min
-            let digits = precision ?? (fraction || (step.map { $0 < 1 } ?? (max - min <= 10)) ? 2 : 0)
+            // The author's precision, else as many decimals as the step has (0.1 → 1), else 2 for small ranges.
+            let digits = precision ?? step.map { Self.decimals($0) } ?? (fraction || max - min <= 10 ? 2 : 0)
             VStack(alignment: .leading, spacing: 2) {
                 HStack {
                     Text(label.text)
@@ -334,6 +335,11 @@ private struct PropertyRow: View {
                 Text(label.text)
             }
         }
+    }
+
+    static func decimals(_ step: Double) -> Int {
+        guard step > 0, step < 1 else { return 0 }
+        return Swift.min(4, Int((-log10(step)).rounded(.up)))
     }
 
     static func format(_ v: Double, _ digits: Int) -> String {
