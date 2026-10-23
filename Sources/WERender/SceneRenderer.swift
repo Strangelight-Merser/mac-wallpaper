@@ -110,6 +110,7 @@ public final class SceneRenderer: WallpaperRenderer {
 
     var programs: [String: Program] = [:]
     var textures: [String: LoadedTexture] = [:]
+    var videoTextures: [URL: VideoTexture] = [:]
     /// Text layers by layer index, and text set by scripts (overriding the static value).
     var textStates: [Int: TextLayerState] = [:]
     var textOverrides: [Int: String] = [:]
@@ -201,6 +202,11 @@ public final class SceneRenderer: WallpaperRenderer {
         renderTargets = [:]
         fullFrameValid = false
         self.commandBuffer = commandBuffer
+        for (name, texture) in textures where texture.video != nil {
+            do {
+                textures[name] = try texture.video!.frame(at: Double(time), clamp: texture.clamp, commandBuffer: commandBuffer)
+            } catch { warn("\(name): video textures: \(error)") }
+        }
 
         let projection = contentProjection(canvas: scene.canvas, output: outputSize, mode: contentMode)
         worldCache = [:]
@@ -731,8 +737,8 @@ public final class SceneRenderer: WallpaperRenderer {
         for (slot, name) in (fixedInputs.isEmpty ? pass.textures : fixedInputs.map { Optional($0) }).enumerated() {
             guard let name else { continue }
             if fixedTextures[slot] == nil {
-                // Text textures are replaced when the text changes: look them up at draw time.
-                sources[slot] = name.hasPrefix("_rt_") || name.hasPrefix("$text:") ? .named(name) : .fixed(try resolveTexture(name))
+                // Text and video textures are replaced: look them up at draw time.
+                sources[slot] = try textureInput(name)
             }
         }
         for (slot, texture) in fixedTextures { sources[slot] = .fixed(texture) }
@@ -754,6 +760,9 @@ public final class SceneRenderer: WallpaperRenderer {
         // expand R8/RG88 and decode DXT normal maps as WE does (materials may still override).
         for (slot, src) in sources {
             if case .fixed(let t) = src, combos["TEX\(slot)FORMAT"] == nil { combos["TEX\(slot)FORMAT"] = t.formatCode }
+            if case .named(let name) = src, textures[name]?.video != nil, combos["TEX\(slot)FORMAT"] == nil {
+                combos["TEX\(slot)FORMAT"] = 0
+            }
         }
         let program = try self.program(shader: pass.shader, combos: combos)
         let pkey = programKey(pass.shader, combos)
@@ -766,7 +775,7 @@ public final class SceneRenderer: WallpaperRenderer {
                 bindings.append((isVertex, i, idx.texture, idx.sampler))
                 guard sources[i] == nil else { continue }
                 if let def = program.annotations.first(where: { $0.name == name })?.defaultValue as? String {
-                    sources[i] = def.hasPrefix("_rt_") ? .named(def) : (try? resolveTexture(def)).map { .fixed($0) }
+                    sources[i] = try? textureInput(def)
                 }
                 if sources[i] == nil { sources[i] = .fixed(white) }
             }
@@ -1028,6 +1037,12 @@ public final class SceneRenderer: WallpaperRenderer {
 
     // MARK: - resources
 
+    private func textureInput(_ name: String) throws -> PassPlan.Input {
+        if name.hasPrefix("_rt_") || name.hasPrefix("$text:") { return .named(name) }
+        let texture = try resolveTexture(name)
+        return texture.video == nil ? .fixed(texture) : .named(name)
+    }
+
     func resolveTexture(_ name: String) throws -> LoadedTexture {
         switch name {
         case "_rt_FullFrameBuffer", "_rt_MipMappedFrameBuffer":
@@ -1041,7 +1056,8 @@ public final class SceneRenderer: WallpaperRenderer {
                 return t
             }
             if let t = textures[name] { return t }
-            let t = try TextureLoader.load(name, locator: locator, device: device)
+            let t = try TextureLoader.load(name, locator: locator, device: device,
+                                           videos: &videoTextures, time: Double(time), commandBuffer: commandBuffer)
             textures[name] = t
             return t
         }

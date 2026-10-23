@@ -71,7 +71,7 @@ public struct Tex {
         case "TEXB0003": return try reader.i32() == 35
         case "TEXB0004":
             let format = try reader.i32(), mp4 = try reader.i32() == 1
-            return format == 35 || (format == -1 && mp4)
+            return format == 35 || mp4
         default: throw WEFormatError.badMagic(container, expected: "TEXB000[1-4]")
         }
     }
@@ -108,14 +108,14 @@ public struct Tex {
         case "TEXB0004":
             freeImage = try r.i32()
             let isMp4 = try r.i32() == 1
-            if freeImage == -1 && isMp4 { freeImage = 35 }
+            if isMp4 { freeImage = 35 }
             version = freeImage == 35 ? 4 : 3
         default: throw WEFormatError.badMagic(cm, expected: "TEXB000[1-4]")
         }
         containerVersion = version
 
         let payload: Payload
-        switch freeImage {
+        switch flags.contains(.isVideo) ? 35 : freeImage {
         case -1: payload = .raw(format)
         case 35: payload = .mp4
         default: payload = .encodedImage(freeImage: freeImage)

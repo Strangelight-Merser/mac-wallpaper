@@ -187,3 +187,8 @@ scene/razer_bedroom.fit             razer_bedroom                               
 scene/razer_bedroom.stretch         razer_bedroom                                        --time 3 --size 1440x932 --mode stretch
 video/h264_mp4.fit                 regression/videos/h264_mp4                           --time 1 --size 1440x932 --mode fit
 video/h264_mp4.stretch             regression/videos/h264_mp4                           --time 1 --size 1440x932 --mode stretch
+# Synthetic 16x16 video shared by two layers: red at 0, blue at 1, loops at 2.
+fixture/videotexturetest.t0          regression/fixtures/videotexturetest                  --time 0 --size 256x128
+fixture/videotexturetest.t1          regression/fixtures/videotexturetest                  --time 1 --size 256x128
+fixture/videotexturetest.cached      regression/fixtures/videotexturetest                  --time 1 --warm 0 --size 256x128
+fixture/videotexturetest.loop        regression/fixtures/videotexturetest                  --time 2 --warm 1 --size 256x128

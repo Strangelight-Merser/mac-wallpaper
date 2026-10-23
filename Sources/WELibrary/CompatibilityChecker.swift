@@ -28,7 +28,7 @@ public struct Compatibility: Codable, Sendable, Equatable {
 
 /// Checks local assets and unsupported features without needing a GPU for static checks.
 public struct CompatibilityChecker: Sendable {
-    public static let version = 5
+    public static let version = 6
     private let assets: URL?
 
     public init(assets: URL?) { self.assets = assets }
@@ -127,6 +127,7 @@ public struct CompatibilityChecker: Sendable {
         }
         result.notes += scene.notes
         var renderable = 0
+        var checkedVideos: [String: String] = [:]
         func checkPasses(_ passes: [SceneDescription.Pass]) -> Set<Feature> {
             var features = Set<Feature>()
             for pass in passes where pass.copy == nil {
@@ -139,8 +140,24 @@ public struct CompatibilityChecker: Sendable {
                     // `$text:` textures are rendered from the text object, not loaded.
                     if name.hasPrefix("_rt_") || name.hasPrefix("$text:") || ["util/white", "util/black"].contains(name) { continue }
                     do {
-                        if try Tex.isVideo(data: locator.data("materials/\(name).tex")) {
-                            features.insert(.videoTexture)
+                        if let note = checkedVideos[name] {
+                            if !note.isEmpty { features.insert(.videoTexture) }
+                            continue
+                        }
+                        let data = try locator.data("materials/\(name).tex")
+                        if try Tex.isVideo(data: data) {
+                            do {
+                                let tex = try Tex(data: data)
+                                guard let mip = tex.images.first?.first else { throw VideoError.decode("no video payload") }
+                                let source = try VideoSource.open(VideoTextureCache.store(mip.bytes))
+                                guard try source.frame(at: 0) != nil else { throw VideoError.decode("no video frame") }
+                                checkedVideos[name] = ""
+                            } catch {
+                                let note = "\(name): video textures: \(error)"
+                                checkedVideos[name] = note
+                                features.insert(.videoTexture)
+                                result.notes.append(note)
+                            }
                         }
                     } catch { features.insert(.missingAsset); result.notes.append("\(name): \(error)") }
                 }
