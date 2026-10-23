@@ -25,8 +25,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         model.contentModeChanged = { [weak self] mode in self?.controller.contentMode = mode }
         return model
     }()
-    lazy var steamModel = SteamModel(library: libraryModel)
-    lazy var libraryWindow = LibraryWindowController(model: libraryModel, steam: steamModel)
+    lazy var steamModel: SteamModel = {
+        let steam = SteamModel(library: libraryModel)
+        steam.afterLogin = { [weak self, weak steam] in
+            guard let self, let steam else { return }
+            if self.setupModel.continueAfterLogin { self.setupModel.welcomeShown = true } else { steam.showImport() }
+        }
+        return steam
+    }()
+    lazy var assetsModel: AssetsModel = {
+        let assets = AssetsModel(connection: steamModel.connection)
+        assets.locationChanged = { [weak self] in
+            guard let self else { return }
+            Task { await self.libraryModel.refresh() }
+            self.loadCurrent()
+        }
+        libraryModel.showAssets = { [weak assets] in assets?.sheetShown = true }
+        return assets
+    }()
+    let setupModel = SetupModel()
+    lazy var libraryWindow = LibraryWindowController(model: libraryModel, steam: steamModel, assets: assetsModel, setup: setupModel)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         applyCommandLine()
@@ -68,7 +86,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         controller.contentMode = LibraryModel.storedContentMode(path: path)
         controller.load(wallpaper: URL(fileURLWithPath: path),
-                        assets: defaults.string(forKey: "assets").map { URL(fileURLWithPath: $0) })
+                        assets: AssetsModel.currentLocation)
         libraryModel.currentPath = path
         log("loading \(path)")
         refreshMenu()
@@ -110,7 +128,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
         menu.addItem(item(String(localized: "Wallpaper Library…"), #selector(showLibrary), "l"))
         menu.addItem(item(String(localized: "Open Wallpaper Folder…"), #selector(chooseWallpaper), "o"))
-        menu.addItem(item(String(localized: "Set Wallpaper Engine Assets Folder…"), #selector(chooseAssets), ""))
+        menu.addItem(item(String(localized: "Wallpaper Engine Files…"), #selector(showAssets), ""))
         menu.addItem(item(String(localized: "Reload"), #selector(reload), "r"))
         menu.addItem(.separator())
         menu.addItem(item(String(localized: "Quit"), #selector(NSApplication.terminate(_:)), "q", target: NSApp))
@@ -193,11 +211,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    @objc func chooseAssets() {
-        if let url = pickFolder(String(localized: "Choose Wallpaper Engine’s “assets” folder")) {
-            defaults.set(url.path, forKey: "assets")
-            loadCurrent()
-        }
+    @objc func showAssets() {
+        showLibrary()
+        assetsModel.sheetShown = true
     }
 
     @objc func reload() { loadCurrent() }

@@ -113,10 +113,10 @@ private struct AssetsBanner: View {
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.yellow)
-            Text("Scene wallpapers need Wallpaper Engine’s “assets” folder (from your Windows PC or Steam) before they can be checked and shown.")
+            Text("Scene wallpapers need Wallpaper Engine’s files before they can be checked and shown.")
                 .fixedSize(horizontal: false, vertical: true)
             Spacer()
-            Button { model.chooseAssets() } label: { Text("Choose Folder…") }
+            Button { model.showAssets() } label: { Text("Get Files…") }
         }
         .padding(12)
         .background(.yellow.opacity(0.12), in: RoundedRectangle(cornerRadius: 8, style: .continuous))

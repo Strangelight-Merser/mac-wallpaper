@@ -203,8 +203,14 @@ private struct DownloadRow: View {
                 Text("\(done.formatted(.byteCount(style: .file))) of \(total.formatted(.byteCount(style: .file)))")
                     .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
             case .finished:
-                Label { Text("Added to the library") } icon: { Image(systemName: "checkmark.circle.fill").foregroundStyle(.green) }
+                Label {
+                    download.kind == .new ? Text("Added to the library") : Text("Updated")
+                } icon: { Image(systemName: "checkmark.circle.fill").foregroundStyle(.green) }
                     .font(.caption)
+            case .held(let reason):
+                Label { Text(reason.explanation) } icon: { Image(systemName: "pause.circle.fill").foregroundStyle(.orange) }
+                    .font(.caption)
+                    .fixedSize(horizontal: false, vertical: true)
             case .failed(let message):
                 HStack {
                     Label { Text(message) } icon: { Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange) }

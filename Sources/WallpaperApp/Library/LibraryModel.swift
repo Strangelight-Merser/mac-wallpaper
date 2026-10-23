@@ -50,7 +50,9 @@ final class LibraryModel {
         currentPath = UserDefaults.standard.string(forKey: "wallpaper")
     }
 
-    var assets: URL? { defaults.string(forKey: "assets").map { URL(fileURLWithPath: $0) } }
+    var assets: URL? { AssetsModel.currentLocation }
+    /// Set by the app delegate: shows the Wallpaper Engine files sheet.
+    var showAssets: () -> Void = {}
 
     var roots: [LibraryRoot] {
         LibraryRoots.steamWorkshopRoots() + [LibraryRoots.downloads]
@@ -138,16 +140,6 @@ final class LibraryModel {
     }
 
     private func saveFolders() { defaults.set(folders.map(\.path), forKey: "libraryFolders") }
-
-    func chooseAssets() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.message = String(localized: "Choose Wallpaper Engine's “assets” folder")
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        defaults.set(url.path, forKey: "assets")
-        Task { await refresh() }
-    }
 
     // MARK: - actions
 

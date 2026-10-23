@@ -103,3 +103,15 @@ struct CompatibilityBadge: View {
         }
     }
 }
+
+extension HoldReason {
+    /// Why an update was not installed (the installed version is kept).
+    var explanation: String {
+        switch self {
+        case .unsupported: String(localized: "Update held back: the new version doesn’t run on this Mac.")
+        case .missingAssets: String(localized: "Update held back: the new version needs Wallpaper Engine files that are missing.")
+        case .lostFeatures(let features):
+            String(localized: "Update held back: the new version uses things this Mac can’t show yet (\(features.map(\.label).joined(separator: ", "))).")
+        }
+    }
+}

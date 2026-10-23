@@ -37,6 +37,12 @@ final class SteamModel {
     var chosen: Set<UInt64> = []
     let queue: DownloadQueue
     let connection = SteamConnection()
+    /// What to do right after a login; by default offer the subscription import.
+    var afterLogin: (() -> Void)?
+    /// Subscriptions compared with our downloads, and held updates / declined items (`.sync-state.json`).
+    private(set) var sync: SyncPlan?
+    private(set) var syncState = SyncState()
+    private var syncStateURL: URL { LibraryRoots.downloads.url.appendingPathComponent(".sync-state.json") }
 
     /// How this Mac appears in Steam's list of authorized devices.
     let deviceName = "mac-wallpaper on " + (Host.current().localizedName ?? "Mac")
@@ -45,6 +51,62 @@ final class SteamModel {
 
     init(library: LibraryModel) {
         queue = DownloadQueue(library: library, connection: connection)
+        syncState = (try? SyncState.load(from: syncStateURL)) ?? SyncState()
+        queue.onFinished = { [weak self] _ in self?.recomputeSync() }
+    }
+
+    // MARK: - sync
+
+    /// Reads the subscriptions (metadata only) and compares them with what is downloaded. Nothing downloads.
+    func syncNow() async {
+        guard account != nil else { return }
+        await loadSubscriptions()
+        guard subscriptionsState == .loaded else { return }
+        syncState.lastSync = Date()
+        try? syncState.save(to: syncStateURL)
+        recomputeSync()
+    }
+
+    func recomputeSync() {
+        syncState = (try? SyncState.load(from: syncStateURL)) ?? syncState
+        guard subscriptionsState == .loaded else { return }
+        sync = try? SubscriptionSync.plan(subscribed: subscriptions, downloads: LibraryRoots.downloads.url,
+                                          declined: syncState.declined)
+    }
+
+    /// Updates not yet queued, and their total size.
+    var pendingUpdates: [WorkshopItem] {
+        (sync?.updated ?? []).map(\.item).filter { item in
+            syncState.held[item.id]?.manifestID != item.contentManifestID && !queue.contains(item.id)
+        }
+    }
+    var pendingUpdateBytes: Int64 { pendingUpdates.reduce(0) { $0 + $1.fileSize } }
+    var newSubscriptionCount: Int { (sync?.new ?? []).filter { !queue.contains($0.id) }.count }
+
+    func installUpdates() { queue.enqueue(pendingUpdates, kind: .update(force: false)) }
+
+    func installHeldUpdate(_ id: UInt64) {
+        guard let item = sync?.updated.first(where: { $0.item.id == id })?.item else { return }
+        queue.enqueue([item], kind: .update(force: true))
+    }
+
+    func dismissHeldUpdate(_ id: UInt64) {
+        syncState.dismiss(id)
+        try? syncState.save(to: syncStateURL)
+        recomputeSync()
+    }
+
+    func isUnsubscribed(_ id: UInt64) -> Bool { sync?.unsubscribed.contains(id) ?? false }
+
+    func hasPreviousVersion(_ id: UInt64) -> Bool {
+        FileManager.default.fileExists(atPath: LibraryRoots.downloads.url.appendingPathComponent(".previous/\(id)").path)
+    }
+
+    func restorePreviousVersion(_ id: UInt64) {
+        let updater = StagedUpdater(root: LibraryRoots.downloads.url, checker: CompatibilityChecker(assets: queue.library.assets),
+                                    deepCheck: false) { _, _ in }
+        do { try updater.rollback(id) } catch { log("restore \(id) failed: \(error)"); return }
+        Task { await queue.library.refresh(); recomputeSync() }
     }
 
     /// Reads the saved login (may show a Keychain prompt for development builds).
@@ -147,7 +209,7 @@ final class SteamModel {
         login = .idle
         loginSheetShown = false
         // Right after logging in, offer to bring over what the user subscribed to in Wallpaper Engine.
-        showImport()
+        if let afterLogin { afterLogin() } else { showImport() }
     }
 
     func signOut() {

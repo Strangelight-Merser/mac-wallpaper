@@ -238,7 +238,7 @@ public struct DownloaderAssetsSteamAccess: AssetsSteamAccess {
         try JSONDecoder().decode(WEAssetsReceipt.self, from: Data(contentsOf: WEAssetsDownloader.receiptURL(for: folder)))
     }
 
-    public static func validFolder(_ folder: URL) -> Bool {
+    public nonisolated static func validFolder(_ folder: URL) -> Bool {
         guard folder.isFileURL else { return false }
         for path in ["shaders", "materials", "effects"] {
             guard (try? folder.appendingPathComponent(path).resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { return false }

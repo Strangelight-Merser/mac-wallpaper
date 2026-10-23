@@ -5,6 +5,8 @@ import WELibrary
 struct LibraryView: View {
     @Bindable var model: LibraryModel
     @Bindable var steam: SteamModel
+    @Bindable var assets: AssetsModel
+    @Bindable var setup: SetupModel
     @State private var downloadsShown = false
 
     var body: some View {
@@ -14,14 +16,22 @@ struct LibraryView: View {
         } detail: {
             WallpaperGrid(model: model)
                 .inspector(isPresented: $model.inspectorShown) {
-                    Inspector(model: model)
+                    Inspector(model: model, steam: steam)
                         .inspectorColumnWidth(min: 260, ideal: 300, max: 380)
                 }
         }
         .searchable(text: $model.search, placement: .toolbar, prompt: Text("Search titles and tags"))
         .sheet(isPresented: $steam.loginSheetShown) { SteamLoginSheet(steam: steam) }
         .sheet(isPresented: $steam.importSheetShown) { ImportSheet(steam: steam) }
+        .sheet(isPresented: $assets.sheetShown) { AssetsSheet(assets: assets, steam: steam) }
+        .sheet(isPresented: $setup.welcomeShown) { WelcomeSheet(setup: setup, steam: steam, assets: assets, library: model) }
         .onAppear { steam.loadAccount() }
+        .task {
+            await assets.refresh()
+            setup.showIfNeeded(steam: steam, assets: assets)
+        }
+        // Compare subscriptions with downloads (metadata only) whenever the account becomes available.
+        .task(id: steam.account?.accountName) { await steam.syncNow() }
         .toolbar {
             ToolbarItemGroup {
                 if !steam.queue.downloads.isEmpty {
@@ -86,6 +96,21 @@ private struct Sidebar: View {
                     .menuStyle(.borderlessButton)
                     .menuIndicator(.hidden)
                     .help(Text("Logged in to Steam"))
+                    if !steam.pendingUpdates.isEmpty {
+                        Button { steam.installUpdates() } label: {
+                            Label {
+                                Text("Update \(steam.pendingUpdates.count) (\(steam.pendingUpdateBytes.formatted(.byteCount(style: .file))))")
+                            } icon: { Image(systemName: "arrow.triangle.2.circlepath") }
+                        }
+                        .buttonStyle(.plain)
+                        .help(Text("New versions are checked before they replace the installed ones."))
+                    }
+                    if steam.newSubscriptionCount > 0 {
+                        Button { steam.showImport() } label: {
+                            Label { Text("\(steam.newSubscriptionCount) New Subscriptions…") } icon: { Image(systemName: "plus.circle") }
+                        }
+                        .buttonStyle(.plain)
+                    }
                 } else {
                     Button { steam.showLogin() } label: {
                         Label { Text("Log In to Steam…") } icon: { Image(systemName: "person.crop.circle.badge.plus") }

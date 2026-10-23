@@ -8,7 +8,7 @@ final class LibraryWindowController: NSWindowController, NSWindowDelegate {
     let model: LibraryModel
     let steam: SteamModel
 
-    init(model: LibraryModel, steam: SteamModel) {
+    init(model: LibraryModel, steam: SteamModel, assets: AssetsModel, setup: SetupModel) {
         self.model = model
         self.steam = steam
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1180, height: 760),
@@ -18,7 +18,7 @@ final class LibraryWindowController: NSWindowController, NSWindowDelegate {
         window.minSize = NSSize(width: 820, height: 520)
         window.toolbarStyle = .unified
         window.isReleasedWhenClosed = false
-        let hosting = NSHostingController(rootView: LibraryView(model: model, steam: steam))
+        let hosting = NSHostingController(rootView: LibraryView(model: model, steam: steam, assets: assets, setup: setup))
         // Otherwise the hosting controller shrinks the window to the content's minimum size.
         hosting.sizingOptions = []
         window.contentViewController = hosting

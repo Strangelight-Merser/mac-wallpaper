@@ -4,6 +4,7 @@ import WERender
 
 struct Inspector: View {
     let model: LibraryModel
+    let steam: SteamModel
 
     var body: some View {
         if let entry = model.selected {
@@ -49,6 +50,10 @@ struct Inspector: View {
                     }
 
                     CompatibilitySection(compatibility: entry.compatibility)
+
+                    if entry.root == .downloads, let id = entry.workshopID {
+                        UpdatesSection(steam: steam, id: id)
+                    }
 
                     if !entry.tags.isEmpty {
                         VStack(alignment: .leading, spacing: 6) {
@@ -202,6 +207,39 @@ struct DisplayModeSection: View {
             }
             .font(.callout)
             .foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// Held updates, restoring the previous version, and items no longer subscribed (downloads only).
+private struct UpdatesSection: View {
+    let steam: SteamModel
+    let id: UInt64
+
+    var body: some View {
+        let held = steam.syncState.held[id]
+        let previous = steam.hasPreviousVersion(id)
+        let unsubscribed = steam.isUnsubscribed(id)
+        if held != nil || previous || unsubscribed {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Updates").font(.headline)
+                if let held {
+                    Text(held.reason.explanation).font(.callout).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack {
+                        Button { steam.installHeldUpdate(id) } label: { Text("Install Anyway") }
+                        Button { steam.dismissHeldUpdate(id) } label: { Text("Keep This Version") }
+                    }
+                }
+                if previous {
+                    Button { steam.restorePreviousVersion(id) } label: { Text("Restore Previous Version") }
+                }
+                if unsubscribed {
+                    Text("No longer in your Steam subscriptions. It stays here until you remove it.")
+                        .font(.callout).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
         }
     }
 }

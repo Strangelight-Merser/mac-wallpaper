@@ -12,10 +12,15 @@ final class DownloadQueue {
             case queued, preparing
             case downloading(done: Int64, total: Int64)
             case finished
+            /// An update that checked worse than the installed version: the installed one was kept.
+            case held(HoldReason)
             case failed(String)
             case cancelled
         }
+        /// New downloads go straight into the library; updates are staged and checked first.
+        enum Kind: Equatable { case new, update(force: Bool) }
         let item: WorkshopItem
+        var kind: Kind = .new
         var state: State = .queued
         var id: UInt64 { item.id }
         var isActive: Bool {
@@ -49,10 +54,10 @@ final class DownloadQueue {
 
     func contains(_ id: UInt64) -> Bool { downloads.contains { $0.id == id && $0.state != .cancelled } }
 
-    func enqueue(_ items: [WorkshopItem]) {
+    func enqueue(_ items: [WorkshopItem], kind: Download.Kind = .new) {
         for item in items where !downloads.contains(where: { $0.id == item.id && $0.isActive }) {
             downloads.removeAll { $0.id == item.id }
-            downloads.append(Download(item: item))
+            downloads.append(Download(item: item, kind: kind))
         }
         if runner == nil { runner = Task { await run() } }
     }
@@ -66,20 +71,23 @@ final class DownloadQueue {
 
     /// Queues a failed or cancelled item again; files already verified in its staging folder are kept.
     func retry(_ id: UInt64) {
-        guard let item = downloads.first(where: { $0.id == id && !$0.isActive && $0.state != .finished })?.item else { return }
-        enqueue([item])
+        guard let d = downloads.first(where: { $0.id == id && !$0.isActive && $0.state != .finished }) else { return }
+        enqueue([d.item], kind: d.kind)
     }
 
     private func run() async {
         while let index = downloads.firstIndex(where: { $0.state == .queued }) {
-            let item = downloads[index].item
-            let task = Task { try await download(item) }
+            let item = downloads[index].item, kind = downloads[index].kind
+            let task = Task {
+                if case .update(let force) = kind { try await self.update(item, force: force) } else { try await download(item) }
+            }
             current = (item.id, task)
             do {
                 try await task.value
-                set(item.id, .finished)
-                log("workshop \(item.id) downloaded")
+                if case .held = downloads.first(where: { $0.id == item.id })?.state {} else { set(item.id, .finished) }
+                log("workshop \(item.id) \(kind == .new ? "downloaded" : "update processed")")
                 await library.refresh()
+                onFinished(item.id)
             } catch is CancellationError {
                 set(item.id, .cancelled)
                 log("workshop \(item.id) cancelled")
@@ -101,10 +109,34 @@ final class DownloadQueue {
         }
     }
 
-    private func download(_ item: WorkshopItem, client: SteamCMClient, session: SteamSession) async throws {
+    /// Called after each download or update (the Steam model refreshes the sync summary).
+    var onFinished: (UInt64) -> Void = { _ in }
+
+    /// An update goes into a staging folder, is checked against the installed version, and only replaces
+    /// it if it is not worse; the replaced version is kept for "Restore Previous Version".
+    private func update(_ item: WorkshopItem, force: Bool) async throws {
+        set(item.id, .preparing)
+        let updater = StagedUpdater(root: LibraryRoots.downloads.url, checker: CompatibilityChecker(assets: library.assets),
+                                    deepCheck: false) { [weak self] item, staging in
+            guard let self else { throw CancellationError() }
+            try await self.connection.run { client, session in
+                try await self.download(item, client: client, session: session, into: staging)
+            }
+        }
+        switch await updater.update(item, force: force) {
+        case .installed: break
+        case .held(let reason): set(item.id, .held(reason))
+        case .failed(let message): throw UpdateFailure(message: message)
+        }
+    }
+
+    struct UpdateFailure: Error, CustomStringConvertible { let message: String; var description: String { message } }
+
+    private func download(_ item: WorkshopItem, client: SteamCMClient, session: SteamSession,
+                          into folder: URL? = nil) async throws {
         let downloader = WorkshopDownloader(client: client, session: session)
         let plan = try await downloader.plan(item)
-        let dest = LibraryRoots.downloads.url.appendingPathComponent(String(item.id), isDirectory: true)
+        let dest = folder ?? LibraryRoots.downloads.url.appendingPathComponent(String(item.id), isDirectory: true)
         try FileManager.default.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
         set(item.id, .downloading(done: 0, total: plan.networkBytes))
         // The user chose this item with its size shown; allow retries on top of the planned bytes.
