@@ -15,6 +15,26 @@ public struct WorkshopItem: Sendable, Codable, Equatable {
     public var kind: Kind?
     public var rating: Rating?
     public var result: Int
+    public var creatorID: UInt64?
+    public var shortDescription: String?
+    public var subscriptions: UInt64?
+    public var favorites: UInt64?
+    public var voteScore: Double?
+    public var votesUp: UInt64?
+    public var votesDown: UInt64?
+    public var timeCreated: Date?
+    public var metadata: String?
+
+    /// Steam UGC resizing parameters; preserves unrelated URL parameters.
+    public func previewURL(width: Int = 320, height: Int = 180) -> URL? {
+        guard width > 0, height > 0, let previewURL,
+              var url = URLComponents(url: previewURL, resolvingAgainstBaseURL: false) else { return nil }
+        var query = (url.queryItems ?? []).filter { !["imw", "imh", "ima", "impolicy"].contains($0.name) }
+        query += [URLQueryItem(name: "imw", value: String(width)), URLQueryItem(name: "imh", value: String(height)),
+                  URLQueryItem(name: "ima", value: "fit")]
+        url.queryItems = query
+        return url.url
+    }
     public init(id: UInt64, appID: UInt32, title: String, fileSize: Int64, timeUpdated: Date,
                 contentManifestID: UInt64, previewURL: URL? = nil, tags: [String] = [], result: Int = 1) {
         self.id = id; self.appID = appID; self.title = title; self.fileSize = fileSize
