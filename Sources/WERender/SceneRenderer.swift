@@ -97,6 +97,11 @@ public final class SceneRenderer: WallpaperRenderer {
     /// Render encoders created by the last encoded frame (stats).
     public private(set) var lastFrameEncoders = 0
     var frameEncoders = 0
+    var particleStates: [Int: ParticleRenderState] = [:]
+    var particleTextures: [String: ParticleTexture] = [:]
+    var particleIndexBuffer: MTLBuffer?
+    let particleRing = ParticleFrameRing()
+    var offlineParticles = false
 
     lazy var white = solid([255, 255, 255, 255])
     lazy var black = solid([0, 0, 0, 255])
@@ -115,7 +120,9 @@ public final class SceneRenderer: WallpaperRenderer {
         scene.notes.forEach(warn)
     }
 
-    public var summary: String { "scene, \(scene.layers.count) layers" }
+    public var summary: String {
+        "scene, \(scene.layers.count) layers" + (scene.particles.isEmpty ? "" : ", \(scene.particles.count) particle systems")
+    }
 
     // MARK: - frame
 
@@ -126,7 +133,9 @@ public final class SceneRenderer: WallpaperRenderer {
         d.storageMode = .private
         let output = device.makeTexture(descriptor: d)!
         let cb = queue.makeCommandBuffer()!
+        offlineParticles = true
         encodeFrame(into: output, commandBuffer: cb, time: time)
+        offlineParticles = false
         cb.commit()
         cb.waitUntilCompleted()
         if let e = cb.error { throw e }
@@ -157,9 +166,17 @@ public final class SceneRenderer: WallpaperRenderer {
         let c = scene.clearColor
         _ = encoder(for: sceneTarget, clear: MTLClearColor(red: Double(c.x), green: Double(c.y), blue: Double(c.z), alpha: 1))
         let projection = coverProjection(output: outputSize)
-        for i in renderOrder where onlyLayers?.contains(scene.layers[i].name) ?? true {
-            let layer = scene.layers[i]
-            do { try renderLayer(i, projection: projection) } catch { warn("\(layer.name): \(error)") }
+        let particleSlot = scene.particles.isEmpty ? 0 : particleRing.acquire(commandBuffer)
+        for object in renderOrder {
+            switch object {
+            case .image(let i):
+                let layer = scene.layers[i]
+                guard onlyLayers?.contains(layer.name) ?? true else { continue }
+                do { try renderLayer(i, projection: projection) } catch { warn("\(layer.name): \(error)") }
+            case .particle(let i):
+                do { try renderParticle(i, projection: projection, slot: particleSlot) }
+                catch { warn("\(scene.particles[i].name): \(error)") }
+            }
         }
         if scene.bloom.enabled && !disableBloom {
             do { try renderBloom() } catch { warn("bloom: \(error)") }
@@ -339,18 +356,7 @@ public final class SceneRenderer: WallpaperRenderer {
     }
 
     /// File order, except that a layer's `dependencies` are rendered before it.
-    lazy var renderOrder: [Int] = {
-        var order: [Int] = [], done = Set<Int>(), visiting = Set<Int>()
-        let byID = Dictionary(scene.layers.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { a, _ in a })
-        func visit(_ i: Int) {
-            guard !done.contains(i), visiting.insert(i).inserted else { return }
-            for dep in scene.layers[i].dependencies { if let j = byID[dep] { visit(j) } }
-            done.insert(i)
-            order.append(i)
-        }
-        scene.layers.indices.forEach(visit)
-        return order
-    }()
+    lazy var renderOrder = scene.orderedObjects()
 
     /// Layer size: from the object/model, or (autosize without either) the base texture's image size.
     lazy var layerSizes: [SIMD2<Float>] = scene.layers.indices.map { i in
@@ -524,6 +530,7 @@ public final class SceneRenderer: WallpaperRenderer {
             case mvp, mvpInverse, time, resolution(Int), texelSize, texelSizeHalf, screen
             case pointer, pointerLast, pointerState, parallaxPosition, effectProjection, effectProjectionInverse
             case audio(bands: Int, right: Bool)
+            case particle(String)
         }
         struct UniformPlan {
             let bufferIndex: Int
@@ -546,6 +553,7 @@ public final class SceneRenderer: WallpaperRenderer {
         /// Static passes are candidates for layer caching.
         var isDynamic = false
         var usesAudio = false
+        var particle = false
 
         init(label: String, program: Program, programKey: String, blend: String, inputs: [Int: Input],
              bindings: [(isVertex: Bool, slot: Int, texture: Int, sampler: Int)]) {
@@ -559,15 +567,19 @@ public final class SceneRenderer: WallpaperRenderer {
     var effectProjection = matrix_identity_float4x4
 
     func plan(_ key: String, pass: SceneDescription.Pass, layer: SceneDescription.ImageLayer?, model: simd_float4x4,
-              hasPrevious: Bool, fixedInputs: [String] = []) throws -> PassPlan {
+              hasPrevious: Bool, fixedInputs: [String] = [], particle: Bool = false,
+              fixedTextures: [Int: LoadedTexture] = [:]) throws -> PassPlan {
         if let p = plans[key] { return p }
 
         // Slot sources: explicit textures, else (effects) slot 0 = previous pass output.
         var sources: [Int: PassPlan.Input] = [:]
         for (slot, name) in (fixedInputs.isEmpty ? pass.textures : fixedInputs.map { Optional($0) }).enumerated() {
             guard let name else { continue }
-            sources[slot] = name.hasPrefix("_rt_") ? .named(name) : .fixed(try resolveTexture(name))
+            if fixedTextures[slot] == nil {
+                sources[slot] = name.hasPrefix("_rt_") ? .named(name) : .fixed(try resolveTexture(name))
+            }
         }
+        for (slot, texture) in fixedTextures { sources[slot] = .fixed(texture) }
         if hasPrevious, sources[0] == nil { sources[0] = .previous }
         // Binds win over everything else.
         for (slot, name) in pass.binds {
@@ -615,6 +627,9 @@ public final class SceneRenderer: WallpaperRenderer {
             var patches: [(patch: PassPlan.Patch, offset: Int, type: String, stride: Int)] = []
             for m in stage.uniforms {
                 let patch: PassPlan.Patch? = {
+                    if particle, ["g_ModelMatrix", "g_ModelMatrixInverse", "g_ViewProjectionMatrix", "g_OrientationUp",
+                                  "g_OrientationRight", "g_OrientationForward", "g_ViewUp", "g_ViewRight", "g_EyePosition",
+                                  "g_RenderVar0", "g_RenderVar1"].contains(m.name) { return .particle(m.name) }
                     switch m.name {
                     case "g_ModelViewProjectionMatrix", "g_EffectModelViewProjectionMatrix": return .mvp
                     case "g_ModelViewProjectionMatrixInverse": return .mvpInverse
@@ -661,7 +676,8 @@ public final class SceneRenderer: WallpaperRenderer {
                                          "g_EffectTextureProjectionMatrixInverse"]
         let uniformNames = (program.compiled.vertex.uniforms + program.compiled.fragment.uniforms).map(\.name)
         plan.usesAudio = uniformNames.contains { $0.hasPrefix("g_AudioSpectrum") }
-        plan.isDynamic = plan.usesAudio || uniformNames.contains { frameVarying.contains($0) }
+        plan.particle = particle
+        plan.isDynamic = particle || plan.usesAudio || uniformNames.contains { frameVarying.contains($0) }
             || sources.values.contains { if case .named = $0 { return true } else { return false } }
         plans[key] = plan
         return plan
@@ -670,7 +686,8 @@ public final class SceneRenderer: WallpaperRenderer {
     static let trace = ProcessInfo.processInfo.environment["WE_TRACE"] != nil
 
     func execute(_ plan: PassPlan, previous: LoadedTexture?, bindPrevious: LoadedTexture? = nil, target: MTLTexture, clear: Bool,
-                 mvp: simd_float4x4, half: SIMD2<Float>, first: Bool) throws {
+                 mvp: simd_float4x4, half: SIMD2<Float>, first: Bool,
+                 particle: ParticleGeometry? = nil, particleValues: [String: [Float]] = [:]) throws {
         if Self.trace {
             print("  pass \(plan.label) [\(plan.programKey)] -> \(target.label ?? "?") \(target.width)x\(target.height) clear=\(clear) inputs=\(plan.inputs.sorted { $0.key < $1.key }.map { "\($0.key):\($0.value)" })")
         }
@@ -689,7 +706,7 @@ public final class SceneRenderer: WallpaperRenderer {
             pipeline = p
         } else {
             var program = plan.program
-            pipeline = try pipelineState(&program, blend: plan.blend, format: target.pixelFormat, key: plan.programKey)
+            pipeline = try pipelineState(&program, blend: plan.blend, format: target.pixelFormat, key: plan.programKey, particle: plan.particle)
             plan.pipelines[target.pixelFormat] = pipeline
         }
 
@@ -705,12 +722,16 @@ public final class SceneRenderer: WallpaperRenderer {
 
         let enc = encoder(for: target, clear: clear ? MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0) : nil)
         enc.setRenderPipelineState(pipeline)
-        enc.setVertexBytes(verts, length: verts.count * 4, index: Self.vertexBufferIndex)
+        if let particle {
+            enc.setVertexBuffer(particle.vertices, offset: 0, index: Self.vertexBufferIndex)
+            enc.setDepthClipMode(.clamp)
+        } else { enc.setVertexBytes(verts, length: verts.count * 4, index: Self.vertexBufferIndex) }
         for (u, isVertex) in [(plan.vertexUniforms, true), (plan.fragmentUniforms, false)] {
             guard var u else { continue }
             for p in u.patches {
                 let v: [Float]
                 switch p.patch {
+                case .particle(let name): v = particleValues[name] ?? []
                 case .mvp: v = mvp.flat
                 case .mvpInverse: v = mvp.inverse.flat
                 case .time: v = [time]
@@ -757,7 +778,11 @@ public final class SceneRenderer: WallpaperRenderer {
                 enc.setFragmentSamplerState(sampler(clamp: t.clamp), index: b.sampler)
             }
         }
-        enc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+        if let particle {
+            enc.drawIndexedPrimitives(type: .triangle, indexCount: particle.count, indexType: .uint32,
+                                      indexBuffer: particle.indices, indexBufferOffset: 0)
+            enc.setDepthClipMode(.clip)
+        } else { enc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4) }
     }
 
     // MARK: - encoders
@@ -1002,7 +1027,9 @@ public final class SceneRenderer: WallpaperRenderer {
             return try self.device.makeLibrary(source: msl, options: o).makeFunction(name: "main0")!
         }
         for (n, _) in compiled.vertex.attributes where n != "a_Position" && n != "a_TexCoord" {
-            warn("\(shader): vertex attribute \(n) not supplied")
+            if shader != "genericparticle" || !ParticleVertices.attributes.contains(where: { $0.name == n }) {
+                warn("\(shader): vertex attribute \(n) not supplied")
+            }
         }
         let t0 = CFAbsoluteTimeGetCurrent()
         let p = Program(compiled: compiled, vertexFunction: try lib(compiled.vertex.msl),
@@ -1012,12 +1039,12 @@ public final class SceneRenderer: WallpaperRenderer {
         return p
     }
 
-    func pipelineState(_ program: inout Program, blend: String, format: MTLPixelFormat, key: String) throws -> MTLRenderPipelineState {
+    func pipelineState(_ program: inout Program, blend: String, format: MTLPixelFormat, key: String, particle: Bool = false) throws -> MTLRenderPipelineState {
         let mode = ["translucent", "additive"].contains(blend) ? blend : "normal"
         if !["normal", "translucent", "additive", "disabled"].contains(blend) {
             warn("blending '\(blend)' treated as normal")
         }
-        let pkey = "\(mode)|\(format.rawValue)"
+        let pkey = "\(mode)|\(format.rawValue)" + (particle ? "|particle" : "")
         if let p = program.pipelines[pkey] { return p }
 
         let pd = MTLRenderPipelineDescriptor()
@@ -1032,7 +1059,7 @@ public final class SceneRenderer: WallpaperRenderer {
             vd.attributes[a].format = .float2; vd.attributes[a].offset = 12; vd.attributes[a].bufferIndex = Self.vertexBufferIndex
         }
         vd.layouts[Self.vertexBufferIndex].stride = 20
-        pd.vertexDescriptor = vd
+        pd.vertexDescriptor = particle ? Self.particleVertexDescriptor(attributes: program.compiled.vertex.attributes) : vd
 
         let a = pd.colorAttachments[0]!
         a.isBlendingEnabled = mode != "normal"

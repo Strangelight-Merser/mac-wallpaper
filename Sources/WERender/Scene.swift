@@ -41,7 +41,12 @@ public struct UserProperties {
     }
 }
 
-/// The subset of scene.json needed for image layers with effects (milestones M3/M4).
+/// An object in scene file order; indices refer to the corresponding scene arrays.
+public enum SceneObject: Equatable {
+    case image(Int), particle(Int)
+}
+
+/// Image layers, particle systems and scene camera settings.
 public struct SceneDescription {
     public struct Pass {
         public var shader: String
@@ -181,7 +186,10 @@ public struct SceneDescription {
     public let hdr: Bool
     public let bloom: (enabled: Bool, strength: Float, threshold: Float)
     public let parallax: Parallax
+    let particleCamera: (fov: Float, near: Float, far: Float)
     public let layers: [ImageLayer]
+    public let particles: [ParticleSystemDescription]
+    public let drawOrder: [SceneObject]
     public let properties: UserProperties
     /// Objects/effects skipped or approximated, for reporting.
     public let notes: [String]
@@ -198,6 +206,7 @@ public struct SceneDescription {
         let scene = try locator.json(file)
         let general = scene["general"] as? [String: Any] ?? [:]
         func f(_ k: String, _ d: Float) -> Float { parseFloats(props.resolve(general[k]))?.first ?? d }
+        particleCamera = (f("fov", 50), f("nearz", 0.01), f("farz", 10000))
         let ortho = general["orthogonalprojection"] as? [String: Any]
         canvas = SIMD2(Float((ortho?["width"] as? NSNumber)?.floatValue ?? 1920),
                        Float((ortho?["height"] as? NSNumber)?.floatValue ?? 1080))
@@ -213,13 +222,28 @@ public struct SceneDescription {
                             mouseInfluence: f("cameraparallaxmouseinfluence", 0))
 
         var layers: [ImageLayer] = []
+        var particles: [ParticleSystemDescription] = []
+        var drawOrder: [SceneObject] = []
         var notes: [String] = []
         for case let obj as [String: Any] in scene["objects"] as? [Any] ?? [] {
             let name = obj["name"] as? String ?? "?"
             // Hidden image layers are kept: other layers may read their composite FBO.
             let visible = props.bool(obj["visible"])
+            if obj["particle"] != nil {
+                do {
+                    let particle = try ParticleSystemDescription(object: obj, locator: locator, properties: props)
+                    func append(_ p: ParticleSystemDescription) {
+                        drawOrder.append(.particle(particles.count))
+                        particles.append(p)
+                        notes += p.notes
+                        p.children.forEach(append)
+                    }
+                    append(particle)
+                } catch { notes.append("\(name): particle asset: \(error)") }
+                continue
+            }
             guard let image = obj["image"] as? String else {
-                let kind = ["particle", "sound", "text", "model", "light"].first { obj[$0] != nil } ?? "other"
+                let kind = ["sound", "text", "model", "light"].first { obj[$0] != nil } ?? "other"
                 notes.append("\(name): \(kind) object not supported"); continue
             }
             let model = try locator.json(image)
@@ -295,6 +319,7 @@ public struct SceneDescription {
             let col = parseFloats(props.resolve(obj["color"])) ?? [1, 1, 1]
             let fullscreen = (model["fullscreen"] as? Bool) == true
             let depth = parseFloats(props.resolve(obj["parallaxDepth"])) ?? [0, 0]
+            drawOrder.append(.image(layers.count))
             layers.append(ImageLayer(
                 id: (obj["id"] as? NSNumber)?.intValue ?? -1, name: name,
                 origin: fullscreen ? SIMD3(canvas.x / 2, canvas.y / 2, 0) : v3("origin", 0),
@@ -312,11 +337,32 @@ public struct SceneDescription {
                 parallaxDepth: SIMD2(depth[0], depth[safe: 1] ?? depth[0])))
         }
         self.layers = layers
+        self.particles = particles
+        self.drawOrder = drawOrder
         self.notes = notes
     }
 }
 
 extension SceneDescription {
+    /// File order, with image dependencies visited before their consumers.
+    func orderedObjects() -> [SceneObject] {
+        var order: [SceneObject] = [], done = Set<Int>(), visiting = Set<Int>()
+        let byID = Dictionary(layers.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { a, _ in a })
+        func visit(_ i: Int) {
+            guard !done.contains(i), visiting.insert(i).inserted else { return }
+            for dep in layers[i].dependencies { if let j = byID[dep] { visit(j) } }
+            done.insert(i)
+            order.append(.image(i))
+        }
+        for object in drawOrder {
+            switch object {
+            case .image(let i): visit(i)
+            case .particle: order.append(object)
+            }
+        }
+        return order
+    }
+
     /// `"conditions": [{"LIGHTING": 1}, ...]` → combo requirements (all must hold).
     static func parseConditions(_ v: Any?) -> [[String: Int]] {
         (v as? [Any] ?? []).compactMap { c in

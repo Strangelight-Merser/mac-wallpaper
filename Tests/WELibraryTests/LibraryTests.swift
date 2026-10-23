@@ -54,7 +54,7 @@ final class LibraryTests: LibraryTestCase {
             ["particle": "p"], ["text": "hello"], ["model": "3d"], ["sound": "s"], ["light": [:]], ["strange": true]])
         let partial = await checker.check(WallpaperEntry(folder: partialFolder, root: .userFolder), deep: false)
         XCTAssertEqual(partial.status, .partial)
-        for feature: Feature in [.particles, .text, .model3D, .sound, .light, .sceneScript, .missingEffect, .unknownObject] {
+        for feature: Feature in [.missingAsset, .text, .model3D, .sound, .light, .sceneScript, .missingEffect, .unknownObject] {
             XCTAssertEqual(partial.missing[feature], 1, feature.rawValue)
         }
         let app = try project("app", type: "application")

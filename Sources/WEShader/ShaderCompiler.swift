@@ -144,7 +144,8 @@ public enum ShaderCompiler {
     static func program(from raw: RawOutput) -> CompiledProgram {
         let vertex = parseStage(msl: raw.vertexMSL, reflection: raw.vertexReflection)
         let fragment = parseStage(msl: raw.fragmentMSL, reflection: raw.fragmentReflection)
-        return CompiledProgram(vertex: padVertexOutputs(vertex, for: fragment), fragment: fragment)
+        let aligned = alignVaryingLocations(fragment, to: vertex)
+        return CompiledProgram(vertex: padVertexOutputs(vertex, for: aligned), fragment: aligned)
     }
 
     static func compileInProcess(vertex: String, fragment: String) throws -> RawOutput {
@@ -225,6 +226,42 @@ public enum ShaderCompiler {
         return CompiledStage(msl: msl, entryPoint: "main0", uniformBufferIndex: buffer,
                              uniformBlockSize: blockSize, uniforms: members,
                              textures: textures.mapValues { (texture: $0.0, sampler: $0.1) }, attributes: attrs)
+    }
+
+    /// glslang numbers varyings per stage in declaration order, so stages that declare them in a different
+    /// order (genericparticle: `v_Color` before `v_TexCoord` in the .vert, the reverse in the .frag) disagree,
+    /// and Metal matches by location. Renumber the fragment inputs to the vertex location of the same name;
+    /// inputs the vertex stage doesn't write move to unused locations (`padVertexOutputs` then zero-fills
+    /// them). Stages that already agree come out unchanged.
+    static func alignVaryingLocations(_ fragment: CompiledStage, to vertex: CompiledStage) -> CompiledStage {
+        func members(_ msl: String, _ structName: String) -> [(name: String, locn: Int)] {
+            guard let r = msl.range(of: "struct \(structName)\n{"), let end = msl[r.upperBound...].range(of: "};") else { return [] }
+            return matches(#"\w+\s+(\w+)\s+\[\[user\(locn(\d+)\)"#, String(msl[r.upperBound..<end.lowerBound]))
+                .compactMap { m in Int(m[2]).map { (m[1], $0) } }
+        }
+        let outputs = Dictionary(members(vertex.msl, "main0_out").map { ($0.name, $0.locn) }, uniquingKeysWith: { a, _ in a })
+        let inputs = members(fragment.msl, "main0_in")
+        var used = Set(outputs.values), next = (outputs.values.max() ?? -1) + 1
+        var target: [String: Int] = [:]
+        for input in inputs {
+            if let l = outputs[input.name] { target[input.name] = l; continue }
+            while used.contains(next) { next += 1 }
+            target[input.name] = next; used.insert(next)
+        }
+        guard inputs.contains(where: { target[$0.name] != $0.locn }),
+              let r = fragment.msl.range(of: "struct main0_in\n{"),
+              let end = fragment.msl[r.upperBound...].range(of: "};") else { return fragment }
+        var body = String(fragment.msl[r.upperBound..<end.lowerBound])
+        for input in inputs {
+            body = body.replacingOccurrences(of: " \(input.name) [[user(locn\(input.locn))",
+                                             with: " \(input.name) [[user(@locn\(target[input.name]!))")
+        }
+        body = body.replacingOccurrences(of: "[[user(@locn", with: "[[user(locn")
+        var msl = fragment.msl
+        msl.replaceSubrange(r.upperBound..<end.lowerBound, with: body)
+        return CompiledStage(msl: msl, entryPoint: fragment.entryPoint, uniformBufferIndex: fragment.uniformBufferIndex,
+                             uniformBlockSize: fragment.uniformBlockSize, uniforms: fragment.uniforms,
+                             textures: fragment.textures, attributes: fragment.attributes)
     }
 
     /// Metal rejects a pipeline whose fragment shader reads a `[[user(locnN)]]` the vertex shader does not

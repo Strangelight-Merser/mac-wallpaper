@@ -90,6 +90,7 @@ let package = Package(
         .target(name: "WEAudio"),
         .target(name: "WEWeb", dependencies: ["WERender"]),
         .target(name: "WERender", dependencies: ["WEFormat", "WEShader", "WEVideo", "WEAudio"]),
+        .testTarget(name: "WERenderTests", dependencies: ["WERender", "WEFormat", "WEShader", "WELibrary"]),
         .executableTarget(name: "wecli", dependencies: ["WEFormat", "WERender", "WEShader", "WEWeb", "WEAudio", "WESteam", "WELibrary"]),
         // Localized strings live in Resources/*.lproj and are copied into the .app by scripts/build.sh.
         .executableTarget(name: "WallpaperApp", dependencies: ["WERender", "WEWeb", "WEAudio", "WELibrary", "WESteam"],

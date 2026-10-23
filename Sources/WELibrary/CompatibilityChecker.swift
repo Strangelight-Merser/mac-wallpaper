@@ -28,7 +28,7 @@ public struct Compatibility: Codable, Sendable, Equatable {
 
 /// Checks local assets and unsupported features without needing a GPU for static checks.
 public struct CompatibilityChecker: Sendable {
-    public static let version = 1
+    public static let version = 2
     private let assets: URL?
 
     public init(assets: URL?) { self.assets = assets }
@@ -97,8 +97,9 @@ public struct CompatibilityChecker: Sendable {
         if containsScript(raw["general"]) || containsScript(project["general"]) { add(.sceneScript) }
         for case let object as [String: Any] in raw["objects"] as? [Any] ?? [] {
             if containsScript(object) { add(.sceneScript) }
+            if object["particle"] != nil { continue }
             guard let image = object["image"] as? String else {
-                let kinds: [(String, Feature)] = [("particle", .particles), ("text", .text), ("model", .model3D), ("sound", .sound), ("light", .light)]
+                let kinds: [(String, Feature)] = [("text", .text), ("model", .model3D), ("sound", .sound), ("light", .light)]
                 if let kind = kinds.first(where: { object[$0.0] != nil }) { add(kind.1) }
                 else if !object.isEmpty { add(.unknownObject) }
                 continue
@@ -126,9 +127,9 @@ public struct CompatibilityChecker: Sendable {
         }
         result.notes += scene.notes
         var renderable = 0
-        for layer in scene.layers {
+        func checkPasses(_ passes: [SceneDescription.Pass]) -> Set<Feature> {
             var features = Set<Feature>()
-            for pass in layer.passes where pass.copy == nil {
+            for pass in passes where pass.copy == nil {
                 for ext in ["vert", "frag"] where !locator.exists("shaders/\(pass.shader).\(ext)") {
                     features.insert(.missingAsset)
                     result.notes.append("missing shader: \(pass.shader).\(ext)")
@@ -143,14 +144,25 @@ public struct CompatibilityChecker: Sendable {
                     } catch { features.insert(.missingAsset); result.notes.append("\(name): \(error)") }
                 }
             }
+            return features
+        }
+        for layer in scene.layers {
+            let features = checkPasses(layer.passes)
             features.forEach(add)
             if !layer.passes.isEmpty, features.isEmpty { renderable += 1 }
         }
+        for particle in scene.particles {
+            let features = checkPasses(particle.passes)
+            features.forEach(add)
+            if particle.notes.contains(where: { $0.contains(": particle ") && $0.hasSuffix("not supported") }) { add(.particles) }
+            if particle.canRender, features.isEmpty { renderable += 1 }
+        }
+        for note in scene.notes where note.contains(": particle asset:") { add(.missingAsset) }
         if scene.notes.contains(where: { $0.hasSuffix(": no material") }) {
             result.missing[.missingAsset, default: 0] += scene.notes.filter { $0.hasSuffix(": no material") }.count
         }
         result.status = renderable == 0 ? .unsupported : result.missing.isEmpty ? .supported : .partial
-        if renderable == 0 { result.notes.append("no renderable image layers") }
+        if renderable == 0 { result.notes.append("no renderable scene objects") }
         return result
     }
 }
@@ -186,9 +198,10 @@ private actor DeepCheck {
                         for layer in scene.scene.layers where warning.hasPrefix(layer.name + ": ") { failedLayers.insert(layer.name) }
                     }
                 }
-                let mappings: [(String, Feature)] = [("particle object", .particles), ("text object", .text),
+                let mappings: [(String, Feature)] = [("text object", .text),
                     ("model object", .model3D), ("sound object", .sound), ("light object", .light),
                     ("other object", .unknownObject), ("video textures", .videoTexture), ("asset not found", .missingAsset)]
+                if lower.contains(": particle "), lower.hasSuffix("not supported") { warningFeatures[.particles, default: 0] += 1 }
                 for (text, feature) in mappings where lower.contains(text) { warningFeatures[feature, default: 0] += 1 }
             }
             if !diagnostics.isEmpty {
@@ -198,7 +211,7 @@ private actor DeepCheck {
             for (feature, count) in warningFeatures { result.missing[feature] = max(result.missing[feature] ?? 0, count) }
             if result.status == .supported, !result.missing.isEmpty { result.status = .partial }
             if let scene = renderer as? SceneRenderer, !failedLayers.isEmpty,
-               scene.scene.layers.allSatisfy({ failedLayers.contains($0.name) }) { result.status = .unsupported }
+               scene.scene.particles.isEmpty, scene.scene.layers.allSatisfy({ failedLayers.contains($0.name) }) { result.status = .unsupported }
         } catch {
             result.status = .unsupported
             result.notes.append(String(describing: error))
