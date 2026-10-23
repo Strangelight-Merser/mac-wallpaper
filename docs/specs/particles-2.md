@@ -1,6 +1,6 @@
 # Particle systems, part 2: event children, rope trails, overrides from scripts (implementation spec)
 
-Status: spec for implementation (2026-10-23). Background: `docs/specs/particles.md` (part 1, implemented),
+Status: implemented and merged (2026-10-23); results in `docs/design.md` §6.29. Background: `docs/specs/particles.md` (part 1, implemented),
 `docs/design.md` §6.25–6.28.
 
 ## 1. What is missing (from the user's wallpapers)

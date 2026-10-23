@@ -625,6 +625,18 @@ SwiftUI（macOS 14），原生 macOS 风格，作为风格讨论的基础；代�
 - 用户习惯开着"点按墙纸以显示桌面"，与壁纸点击不冲突：第一下推开窗口，桌面露出后再点。
 
 
+## 6.29 视频纹理、显示方式、粒子第二部分（2026-10-23）
+
+三项由 Codex 在三个 worktree 里并行实现（用户同意从这次起用 fast 模式），我审查、合并、实测；显示方式的界面由我做。
+
+- **视频纹理**（`docs/specs/video-textures.md`）："Persona 3 reload 音乐播放器"的噪点背景是一个 60 MB 的 MP4：`TEXB0003` 容器、格式 -1、flags 带视频位，`Tex.isVideo` 认得，解码路径却按 RGBA 原始像素读。现在这类 payload 走 `VideoSource`（AVAssetReader / VideoToolbox），每个视频一个解码器、多处共享，每帧零拷贝换上，采样它的 pass 在绘制时按名字取纹理；payload 按内容哈希缓存到 `~/Library/Caches/MacWallpaper/video-textures/`。自制回归素材是 16×16 的红/蓝两秒视频。
+- **显示方式**（`docs/specs/content-mode.md`）：渲染器有 `contentMode`（铺满 / 完整显示 / 拉伸）和黑边颜色；场景的投影、鼠标映射、粒子、脚本命中统一跟随，完整显示时黑边区域不响应鼠标。壁纸库检查器新增"显示方式"，按壁纸保存，当前壁纸改动立即生效（网页壁纸不显示）。SwiftUI 自带同名的 `ContentMode`，界面代码里写全模块名。
+- **粒子第二部分**（`docs/specs/particles-2.md`）：事件子粒子（出生、死亡、跟随）、绳状拖尾（WE 自带 `genericropeparticle` 的非几何着色器路径少一对括号，加载时在内存里修正）、脚本读写 `instanceoverride`（数量、频率、透明度、颜色等）。"Alone. and Sad." 的流星现在带拖尾。
+- 审查时：删掉 Codex 写进测试素材的两份 README（约定文档不由它写）；兼容性检查器版本合并后为 7。
+
+**结果**：回归 153 例、单元测试 153 项全部通过；用户 16 个下载**全部完全支持**。
+
+
 ## 7. 待确认
 1. 最低系统版本：建议 macOS 14（SMAppService、ScreenCaptureKit 音频成熟）。
 2. 工程形态：目前采用 SwiftPM + 生成 .app 的脚本（§6.11）；到需要正式签名分发时，再考虑加一个 Xcode 工程来包装。

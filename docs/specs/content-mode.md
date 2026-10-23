@@ -1,6 +1,6 @@
 # Fit / fill / stretch for wallpapers (renderer part; implementation spec)
 
-Status: spec for implementation (2026-10-23). Background: `docs/design.md` §6.28 ("你的名字" is cropped on the
+Status: implemented and merged (2026-10-23); results in `docs/design.md` §6.29. Background: `docs/design.md` §6.28 ("你的名字" is cropped on the
 user's 1440×932 screen because a 16:9 video is cover-fitted).
 
 ## 1. Goal

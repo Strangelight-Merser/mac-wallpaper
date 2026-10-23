@@ -1,6 +1,6 @@
 # Video textures in scenes (implementation spec)
 
-Status: spec for implementation (2026-10-23). Background: `docs/design.md` §6.25–6.28.
+Status: implemented and merged (2026-10-23); results in `docs/design.md` §6.29. Background: `docs/design.md` §6.25–6.28.
 
 ## 1. Problem
 
