@@ -18,6 +18,7 @@ extension ShaderPreprocessor {
 
     /// Implicit vector truncation, e.g. `vec2 uv = v_TexCoord;` with a `vec4 v_TexCoord`,
     /// `float m = texSample2D(...);` or passing a vec4 to a `vec2` parameter.
+    /// Also repairs bool arithmetic, floating remainder, scalar mix endpoints and runtime constants.
     public static func fixImplicitTruncation(_ src: String) -> String {
         // Flat symbol table: declared name → component count (globals, locals and parameters).
         var types: [String: Int] = [:]
@@ -66,19 +67,33 @@ extension ShaderPreprocessor {
             }
             lines[i] = l
         }
-        return lines.joined(separator: "\n")
+        return fixHLSLLeniency(lines.joined(separator: "\n"))
     }
 
-    /// Vertex/fragment declare the same varying with different widths (WE pads silently). Widen the
-    /// vertex output and pad its assignments, as linux-wallpaperengine does for `vec2 → vec4`.
+    /// Share effective combo definitions on retry, then match varying widths. Pad narrow vertex
+    /// outputs; project widened fragment inputs back to the components their expressions expect.
     public static func reconcileVaryings(vertex: String, fragment: String) -> (String, String) {
+        let (vertex, fragment) = sharedRetryCombos(vertex: vertex, fragment: fragment)
         let declRe = #"\bvarying\s+(float|vec2|vec3|vec4)\s+(\w+)\s*;"#
         var fragTypes: [String: String] = [:]
         for m in allMatches(declRe, fragment) { fragTypes[m[2]] = m[1] }
-        var v = vertex
+        var v = vertex, f = fragment
         for m in allMatches(declRe, vertex) {
-            guard let ft = fragTypes[m[2]], let vn = components(m[1]), let fn = components(ft), fn > vn else { continue }
+            guard let ft = fragTypes[m[2]], let vn = components(m[1]), let fn = components(ft), fn != vn else { continue }
             let name = m[2]
+            if vn > fn {
+                let code = CompatSource(f)
+                var edits: [(Range<Int>, String)] = []
+                for i in code.tokens.indices where code.tokens[i].text == name {
+                    if i >= 2, code.tokens[i - 2].text == "varying" {
+                        edits.append(((i - 1)..<i, m[1]))
+                    } else if i + 1 < code.tokens.count, ![".", "["].contains(code.tokens[i + 1].text) {
+                        edits.append((i..<(i + 1), name + swizzles[fn]))
+                    }
+                }
+                f = code.replacing(edits)
+                continue
+            }
             v = replace(#"\bvarying\s+"# + m[1] + #"\s+"# + name + #"\s*;"#, in: v, with: "varying \(ft) \(name);")
             let pad = Array(repeating: "0.0", count: fn - vn - 1) + ["1.0"]
             let re = try! NSRegularExpression(pattern: #"(?m)^(\s*)"# + name + #"\s*=\s*([^;]+);"#)
@@ -91,7 +106,7 @@ extension ShaderPreprocessor {
             }
             v = out
         }
-        return (v, fragment)
+        return (v, f)
     }
 
     /// True when `call` is `name(...)` with the final `)` closing the first `(`.
@@ -132,5 +147,298 @@ extension ShaderPreprocessor {
             rest = rest[idx...]
         }
         return result + rest
+    }
+}
+
+/// Token ranges keep compatibility edits out of comments and preprocessor directives.
+private struct CompatSource {
+    struct Token {
+        let text: String
+        let range: NSRange
+    }
+
+    let source: NSString
+    let tokens: [Token]
+    var pairs: [Int: Int] = [:]
+    var types: [String: String] = [:]
+    var functions: [String: String] = [:]
+
+    init(_ text: String) {
+        let source = text as NSString
+        self.source = source
+        let pattern = #"(?m)^[ \t]*#(?:[^\n\\]|\\[^\n]|\\\n)*|//[^\n]*|/\*[\s\S]*?\*/|\b[A-Za-z_]\w*|(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?[fFuU]?|==|!=|<=|>=|&&|\|\||\+\+|--|\+=|-=|\*=|/=|%=|[^\s]"#
+        let re = try! NSRegularExpression(pattern: pattern)
+        tokens = re.matches(in: text, range: NSRange(location: 0, length: source.length)).compactMap { m in
+            let s = source.substring(with: m.range)
+            let trimmed = s.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.hasPrefix("#"), !s.hasPrefix("//"), !s.hasPrefix("/*") else { return nil }
+            return Token(text: s, range: m.range)
+        }
+        for m in ShaderPreprocessor.allMatches(#"(?m)^[ \t]*#define[ \t]+(\w+)[ \t]+([+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?[fFuU]?)[ \t]*$"#, text) {
+            let value = m[2].lowercased()
+            types[m[1]] = value.contains(".") || value.contains("e") || value.hasSuffix("f") ? "float" : value.hasSuffix("u") ? "uint" : "int"
+        }
+        var stack: [Int] = []
+        for i in tokens.indices {
+            let t = tokens[i].text
+            if ["(", "[", "{"].contains(t) { stack.append(i) }
+            if [")", "]", "}"].contains(t), let start = stack.popLast() {
+                pairs[start] = i; pairs[i] = start
+            }
+            if Self.width(t) != nil, i + 2 < tokens.count {
+                let name = tokens[i + 1].text
+                if tokens[i + 2].text == "(" { functions[name] = t }
+                else { types[name] = t }
+            }
+        }
+    }
+
+    static func width(_ type: String) -> Int? {
+        if ["float", "int", "uint", "bool"].contains(type) { return 1 }
+        if ["vec2", "vec3", "vec4", "ivec2", "ivec3", "ivec4", "uvec2", "uvec3", "uvec4", "bvec2", "bvec3", "bvec4"].contains(type) {
+            return Int(type.suffix(1))
+        }
+        return nil
+    }
+
+    func text(_ range: Range<Int>) -> String {
+        guard !range.isEmpty else { return "" }
+        let start = tokens[range.lowerBound].range.location
+        let end = NSMaxRange(tokens[range.upperBound - 1].range)
+        return source.substring(with: NSRange(location: start, length: end - start))
+    }
+
+    func replacing(_ edits: [(Range<Int>, String)]) -> String {
+        var out = source as String
+        for (range, replacement) in edits.sorted(by: { $0.0.lowerBound > $1.0.lowerBound }) {
+            let start = tokens[range.lowerBound].range.location
+            let end = NSMaxRange(tokens[range.upperBound - 1].range)
+            out = (out as NSString).replacingCharacters(in: NSRange(location: start, length: end - start), with: replacement)
+        }
+        return out
+    }
+
+    func arguments(_ open: Int) -> [Range<Int>] {
+        guard let close = pairs[open] else { return [] }
+        var result: [Range<Int>] = [], start = open + 1, i = start
+        while i < close {
+            if let end = pairs[i], end > i { i = end + 1; continue }
+            if tokens[i].text == "," { result.append(start..<i); start = i + 1 }
+            i += 1
+        }
+        result.append(start..<close)
+        return result
+    }
+
+    func type(_ range: Range<Int>) -> String? {
+        guard !range.isEmpty else { return nil }
+        let lo = range.lowerBound, hi = range.upperBound
+        if tokens[lo].text == "(", pairs[lo] == hi - 1 { return type((lo + 1)..<(hi - 1)) }
+        if hi == lo + 1 {
+            let t = tokens[lo].text
+            if t == "true" || t == "false" { return "bool" }
+            if let known = types[t] { return known }
+            if t.first?.isNumber == true || t.first == "." {
+                return t.contains(".") || t.lowercased().contains("e") || t.lowercased().hasSuffix("f") ? "float" : t.lowercased().hasSuffix("u") ? "uint" : "int"
+            }
+            return nil
+        }
+        var top: [Int] = [], i = lo
+        while i < hi {
+            if let end = pairs[i], end > i { i = end + 1; continue }
+            top.append(i); i += 1
+        }
+        if top.contains(where: { ["==", "!=", "<", ">", "<=", ">=", "&&", "||"].contains(tokens[$0].text) }) { return "bool" }
+        for ops in [["+", "-"], ["*", "/", "%"]] {
+            if let op = top.last(where: { $0 > lo && ops.contains(tokens[$0].text) && !["+", "-", "*", "/", "%"].contains(tokens[$0 - 1].text) }) {
+                let a = type(lo..<op), b = type((op + 1)..<hi)
+                if let a, let b {
+                    if a == "bool" { return b }; if b == "bool" { return a }
+                    if (Self.width(a) ?? 0) > 1 { return a }
+                    if (Self.width(b) ?? 0) > 1 { return b }
+                    return a == "float" || b == "float" ? "float" : a
+                }
+                return nil
+            }
+        }
+        if ["+", "-", "!"].contains(tokens[lo].text) { return tokens[lo].text == "!" ? "bool" : type((lo + 1)..<hi) }
+        if hi >= lo + 3, tokens[hi - 2].text == ".", let base = type(lo..<(hi - 2)) {
+            let swizzle = tokens[hi - 1].text
+            if swizzle.allSatisfy({ "xyzwrgbastpq".contains($0) }), (1...4).contains(swizzle.count) {
+                if base.hasPrefix("vec") || base == "float" { return swizzle.count == 1 ? "float" : "vec\(swizzle.count)" }
+                if base.hasPrefix("bvec") { return swizzle.count == 1 ? "bool" : "bvec\(swizzle.count)" }
+            }
+        }
+        if tokens[hi - 1].text == "]", let open = pairs[hi - 1], open > lo {
+            return type(lo..<open)
+        }
+        if lo + 1 < hi, tokens[lo + 1].text == "(", pairs[lo + 1] == hi - 1 {
+            let name = tokens[lo].text
+            if Self.width(name) != nil { return name }
+            if let t = functions[name] { return t }
+            if ["CASTF", "dot", "length", "distance"].contains(name) { return "float" }
+            if ["CAST2", "CAST3", "CAST4"].contains(name) { return "vec" + name.suffix(1) }
+            if ["texture", "texSample2D", "texSample2DLod", "textureLod"].contains(name) { return "vec4" }
+            if ["WE_compatRemainder", "abs", "floor", "ceil", "trunc", "fract", "frac", "sin", "cos", "sqrt", "pow", "min", "max", "clamp", "saturate", "mix", "lerp"].contains(name), let first = arguments(lo + 1).first {
+                return type(first)
+            }
+        }
+        return nil
+    }
+
+    func leftOperand(_ op: Int) -> Range<Int>? {
+        guard op > 0 else { return nil }
+        var start = op - 1
+        if let open = pairs[start], open < start {
+            start = open
+            if start > 0, tokens[start - 1].text.first?.isLetter == true,
+               !["return", "if", "while", "switch"].contains(tokens[start - 1].text) { start -= 1 }
+        }
+        while start >= 2 && tokens[start - 1].text == "." { start -= 2 }
+        if start > 0, ["+", "-", "!"].contains(tokens[start - 1].text),
+           start == 1 || ["(", "=", ",", "+", "-", "*", "/", "%"].contains(tokens[start - 2].text) { start -= 1 }
+        return start..<op
+    }
+
+    func rightOperand(_ op: Int) -> Range<Int>? {
+        let start = op + 1
+        guard start < tokens.count else { return nil }
+        var end = start
+        while end < tokens.count && ["+", "-", "!"].contains(tokens[end].text) { end += 1 }
+        guard end < tokens.count else { return nil }
+        if let close = pairs[end], close > end { end = close + 1 }
+        else { end += 1 }
+        while end < tokens.count {
+            if ["(", "["].contains(tokens[end].text), let close = pairs[end] { end = close + 1 }
+            else if tokens[end].text == ".", end + 1 < tokens.count { end += 2 }
+            else { break }
+        }
+        return start..<end
+    }
+}
+
+extension ShaderPreprocessor {
+    private static func fixHLSLLeniency(_ source: String) -> String {
+        var result = fixRuntimeConstants(source)
+        // Re-tokenize after each edit so nested calls and chained operators keep their precedence.
+        var remainderTypes = Set<String>()
+        while true {
+            let code = CompatSource(result)
+            var edit: (Range<Int>, String)?
+            for i in code.tokens.indices {
+                let op = code.tokens[i].text
+                if ["mix", "lerp"].contains(op), i + 1 < code.tokens.count, code.tokens[i + 1].text == "(" {
+                    let args = code.arguments(i + 1)
+                    guard args.count == 3, let a = code.type(args[0]), let b = code.type(args[1]) else { continue }
+                    if ["float", "int", "uint"].contains(a), b.hasPrefix("vec") { edit = (args[0], "\(b)(\(code.text(args[0])))") }
+                    else if ["float", "int", "uint"].contains(b), a.hasPrefix("vec") { edit = (args[1], "\(a)(\(code.text(args[1])))") }
+                } else if ["+", "-", "*", "/", "%"].contains(op),
+                          var left = code.leftOperand(i), let right = code.rightOperand(i) {
+                    if op == "%" {
+                        while left.lowerBound > 0, ["*", "/", "%"].contains(code.tokens[left.lowerBound - 1].text),
+                              let earlier = code.leftOperand(left.lowerBound - 1) { left = earlier.lowerBound..<i }
+                    }
+                    guard let a = code.type(left), let b = code.type(right) else { continue }
+                    if a == "bool", b != "bool", op != "%" {
+                        let cast = b == "int" || b == "uint" ? b : "float"
+                        edit = (left, "\(cast)(\(code.text(left)))")
+                    } else if b == "bool", a != "bool", op != "%" {
+                        let cast = a == "int" || a == "uint" ? a : "float"
+                        edit = (right, "\(cast)(\(code.text(right)))")
+                    } else if a == "uint", b == "int" {
+                        edit = (right, "uint(\(code.text(right)))")
+                    } else if a == "int", b == "uint" {
+                        edit = (left, "uint(\(code.text(left)))")
+                    } else if op == "%", a == "float" || b == "float" || a.hasPrefix("vec") || b.hasPrefix("vec") {
+                        let width = max(CompatSource.width(a) ?? 1, CompatSource.width(b) ?? 1)
+                        let t = width == 1 ? "float" : "vec\(width)"
+                        let call = "WE_compatRemainder(\(t)(\(code.text(left))), \(t)(\(code.text(right))))"
+                        edit = (left.lowerBound..<right.upperBound, call)
+                        remainderTypes.insert(t)
+                    }
+                }
+                if edit != nil { break }
+            }
+            guard let edit else { break }
+            result = code.replacing([edit])
+        }
+        if !remainderTypes.isEmpty {
+            result = castRemainderAssignments(result)
+            let functions = remainderTypes.sorted().map {
+                "\($0) WE_compatRemainder(\($0) x, \($0) y) { return x - y * trunc(x / y); }\n"
+            }.joined()
+            if let end = result.firstIndex(of: "\n"), result.hasPrefix("#version") { result.insert(contentsOf: functions, at: result.index(after: end)) }
+            else { result = functions + result }
+        }
+        return result
+    }
+
+    private static func castRemainderAssignments(_ source: String) -> String {
+        let code = CompatSource(source)
+        var edits: [(Range<Int>, String)] = []
+        for i in code.tokens.indices where code.tokens[i].text == "=" && i > 0 {
+            guard let t = code.types[code.tokens[i - 1].text], ["int", "uint"].contains(t) else { continue }
+            var end = i + 1
+            while end < code.tokens.count && code.tokens[end].text != ";" { end += 1 }
+            let rhs = (i + 1)..<end
+            guard rhs.contains(where: { code.tokens[$0].text == "WE_compatRemainder" }) else { continue }
+            edits.append((rhs, "\(t)(\(code.text(rhs)))"))
+        }
+        return code.replacing(edits)
+    }
+
+    private static func fixRuntimeConstants(_ source: String) -> String {
+        let code = CompatSource(source)
+        var runtime = Set(code.functions.keys)
+        var macros: [String: Set<String>] = [:]
+        for m in allMatches(#"(?m)^[ \t]*#define[ \t]+(\w+)([^\n]*)"#, source) {
+            macros[m[1], default: []].formUnion(allMatches(#"\b[A-Za-z_]\w*"#, m[2]).map { $0[0] })
+        }
+        var depth = 0, edits: [(Range<Int>, String)] = []
+        for i in code.tokens.indices {
+            let token = code.tokens[i].text
+            if token == "{" { depth += 1 }; if token == "}" { depth -= 1 }
+            guard depth == 0 else { continue }
+            if CompatSource.width(token) != nil, i + 2 < code.tokens.count,
+               ["=", ";", "["].contains(code.tokens[i + 2].text), i == 0 || code.tokens[i - 1].text != "const" {
+                runtime.insert(code.tokens[i + 1].text)
+            }
+            guard token == "const", i + 4 < code.tokens.count, code.tokens[i + 3].text == "=" else { continue }
+            var end = i + 4
+            while end < code.tokens.count && code.tokens[end].text != ";" { end += 1 }
+            var dependencies = Set(code.tokens[(i + 4)..<end].map(\.text))
+            var pending = Array(dependencies)
+            while let name = pending.popLast() {
+                for dependency in macros[name] ?? [] where dependencies.insert(dependency).inserted { pending.append(dependency) }
+            }
+            if !dependencies.isDisjoint(with: runtime) {
+                edits.append((i..<(i + 1), ""))
+                runtime.insert(code.tokens[i + 2].text)
+            }
+        }
+        return code.replacing(edits)
+    }
+
+    // process() discovers CRLF annotations after normalization; share those effective defines on retry.
+    private static func sharedRetryCombos(vertex: String, fragment: String) -> (String, String) {
+        let names = Set(scan(vertex).combos.keys).union(scan(fragment).combos.keys)
+        func definitions(_ source: String) -> [String: String] {
+            Dictionary(allMatches(#"(?m)^#define (\w+) (-?\d+)[ \t]*$"#, source).map { ($0[1], $0[2]) }, uniquingKeysWith: { a, _ in a })
+        }
+        let vd = definitions(vertex), fd = definitions(fragment)
+        let shared = fd.merging(vd) { _, v in v }
+        func sync(_ source: String, _ own: [String: String]) -> String {
+            var result = source
+            for name in names.sorted() {
+                guard let value = shared[name], own[name] != value else { continue }
+                if own[name] != nil {
+                    result = replace("(?m)^#define " + name + #" -?\d+[ \t]*$"#, in: result, with: "#define \(name) \(value)")
+                } else if let end = result.firstIndex(of: "\n") {
+                    result.insert(contentsOf: "#define \(name) \(value)\n", at: result.index(after: end))
+                }
+            }
+            return result
+        }
+        return (sync(vertex, vd), sync(fragment, fd))
     }
 }
