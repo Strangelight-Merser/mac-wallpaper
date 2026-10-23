@@ -4,7 +4,8 @@ import simd
 
 /// One scene, one JSContext. Create and use this object on a single thread (no main-thread requirement).
 public final class SceneScriptEngine {
-    private let host: SceneScriptHost
+    /// Unowned: the host (the renderer) owns the engine.
+    private unowned let host: SceneScriptHost
     private let context: JSContext
     private var runtime: JSValue!
     private var vectors: [Int: JSValue] = [:]
@@ -173,6 +174,7 @@ public final class SceneScriptEngine {
             case "rate": if value.isNull { return js(animation.rate) }; animation.rate = value.toDouble()
             default: break
             }
+        case "sound": return js(host.soundCommand(object: id, key))
         case "log": host.log(ScriptLogLevel(rawValue: key) ?? .log, value.toString())
         case "storage": if storageURL != nil { pendingStorage = value.toString() }
         default: break

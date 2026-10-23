@@ -154,6 +154,9 @@ extension SceneRenderer: SceneScriptHost {
             return .vec2(SIMD2(Double(s.x), Double(s.y)))
         case "text": return layerIndex.flatMap(currentText).map { .string($0) }
         case "pointsize": return layerIndex.flatMap(textObject).map { .number(Double($0.pointSize)) }
+        case "volume":
+            if let v = sound?.volume(id) { return .number(Double(v)) }
+            return scene.sounds.first { $0.id == id }.map { .number(Double($0.volume)) }
         case "horizontalalign", "verticalalign":
             guard let t = layerIndex.flatMap(textObject) else { return nil }
             let names = property == "horizontalalign" ? ["left", "center", "right"] : ["top", "center", "bottom"]
@@ -205,6 +208,9 @@ extension SceneRenderer: SceneScriptHost {
             guard let i = layerIndex, let v = Self.vec3(value) else { return }
             scene.layers[i].color = v
             uniformsDirty.insert(i)
+            return
+        case "volume":
+            if let f = Self.floats(value)?.first { sound?.setVolume(id, f) }
             return
         case "horizontalalign", "verticalalign", "maxwidth", "pointsize", "padding":
             guard let i = layerIndex, var t = textObject(i) else { return }
@@ -271,6 +277,17 @@ extension SceneRenderer: SceneScriptHost {
     }
     public func log(_ level: ScriptLogLevel, _ message: String) {
         if level != .log { warnOnce("SceneScript \(level.rawValue): \(message)") }
+    }
+    public func soundCommand(object id: Int, _ command: String) -> Bool {
+        guard let sound else { return false }
+        switch command {
+        case "play": sound.play(id)
+        case "stop": sound.stop(id)
+        case "pause": sound.pause(id)
+        case "isPlaying": return sound.isPlaying(id)
+        default: break
+        }
+        return false
     }
     public func sortLayer(object: Int, index: Int) { warnOnce("SceneScript: thisScene.sortLayer is not supported yet") }
     public func effectIndex(object id: Int, named name: String) -> Int? {

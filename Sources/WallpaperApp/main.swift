@@ -15,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     let mouseItem = NSMenuItem(title: String(localized: "Mouse Interaction"), action: #selector(toggleMouse), keyEquivalent: "")
     let audioItem = NSMenuItem(title: String(localized: "Audio Visualization (System Audio)"), action: #selector(toggleAudio), keyEquivalent: "")
     let fpsMenu = NSMenu()
+    let soundMenu = NSMenu()
     lazy var libraryModel: LibraryModel = {
         let model = LibraryModel()
         model.apply = { [weak self] entry in
@@ -31,6 +32,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         controller = WallpaperController()
         controller.fps = defaults.object(forKey: "fps") as? Int ?? 30
         controller.mouseInput = defaults.object(forKey: "mouseInput") as? Bool ?? true
+        controller.soundVolume = defaults.object(forKey: "soundVolume") as? Float ?? 1
         // Only re-enable audio if the permission is still there (no prompt at launch).
         controller.audioEnabled = defaults.bool(forKey: "audio") && SystemAudioCapture.hasPermission
         controller.onStateChange = { [weak self] in self?.refreshMenu() }
@@ -85,6 +87,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(fpsItem)
         mouseItem.target = self
         menu.addItem(mouseItem)
+        let soundItem = NSMenuItem(title: String(localized: "Wallpaper Sound"), action: nil, keyEquivalent: "")
+        for percent in [0, 25, 50, 100] {
+            let title = percent == 0 ? String(localized: "Off") : "\(percent)%"
+            let i = NSMenuItem(title: title, action: #selector(setSoundVolume(_:)), keyEquivalent: "")
+            i.tag = percent; i.target = self
+            soundMenu.addItem(i)
+        }
+        soundItem.submenu = soundMenu
+        menu.addItem(soundItem)
         audioItem.target = self
         menu.addItem(audioItem)
         menu.addItem(.separator())
@@ -113,11 +124,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         pauseItem.title = controller.pauseReasons.contains(.user) ? String(localized: "Resume") : String(localized: "Pause")
         for i in fpsMenu.items { i.state = i.tag == controller.fps ? .on : .off }
         mouseItem.state = controller.mouseInput ? .on : .off
+        for i in soundMenu.items { i.state = i.tag == Int((controller.soundVolume * 100).rounded()) ? .on : .off }
         audioItem.state = controller.audioEnabled ? .on : .off
     }
 
     @objc func togglePause() {
         controller.setPaused(.user, !controller.pauseReasons.contains(.user))
+    }
+
+    @objc func setSoundVolume(_ sender: NSMenuItem) {
+        controller.soundVolume = Float(sender.tag) / 100
+        defaults.set(controller.soundVolume, forKey: "soundVolume")
+        refreshMenu()
     }
 
     @objc func toggleMouse() {

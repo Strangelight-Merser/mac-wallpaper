@@ -599,6 +599,23 @@ SwiftUI（macOS 14），原生 macOS 风格，作为风格讨论的基础；代�
 **结果**（深度检查，用户 16 个下载）：完全支持从 3 个（只有视频）增加到 10 个，场景 13 个里 7 个完全支持。剩下的缺口（用到 / 唯一缺口）：声音 5/2、粒子 2/0、SceneScript 2/1、视频纹理 1/0。"Persona 3 Reload 昼夜"画面整体放大的问题在脚本之前就存在，另查。
 
 
+## 6.27 声音对象（2026-10-23）
+
+**调查**：用户 5 个壁纸和自带的 dino_run 共有 31 个声音对象：音乐和音效，格式为 mp3、ogg、wav；`playbackmode` 有 loop（按顺序循环）、random（随机播放一首，结束后停 `mintime`–`maxtime` 秒）、single（脚本调用一次播一次）；`startsilent` 的声音等脚本 `play()`；音量常绑定用户属性（"音乐音量"）。
+
+**实现**（我做，`Sources/WERender/Sound/SceneSound.swift`）：
+- `SceneSoundPlayer` 用 AVAudioEngine，每个声音对象一个 player node，文件按需从磁盘流式读取（pkg 里的文件解出到缓存）。loop 在上一首读完时就排下一首（无缝），random 在播完后等随机时长，single 播完即停。所有状态在一个串行队列上，任意线程都能调用。
+- macOS 15 的 AVFoundation 自带 Ogg Vorbis 解码，不需要第三方库（macOS 14 可能不支持，打不开时记一条说明）。
+- 有些创意工坊壁纸把 Ogg 文件存成 ".mp3"，AVFoundation 按扩展名选解码器会失败：按文件头判断真实格式，扩展名不对时通过缓存里一个扩展名正确的符号链接打开。
+- 脚本：`thisLayer.play()/stop()/pause()/isPlaying()` 和 `volume` 接到播放器（SceneScript 运行时里原来是警告桩）。
+- App：菜单新增"壁纸声音"（关 / 25% / 50% / 100%，默认 100%，与 WE 一致）；只在壁纸运行且至少一块屏幕可见时播放，暂停、锁屏、被全屏应用盖住时停，切换壁纸时旧声音停止。顺带修了渲染器与脚本引擎的循环引用（否则换壁纸后旧渲染器和它的声音不会释放）。
+- `wecli sound <壁纸> --assets <目录> [--seconds N]`：离线混音（AVAudioEngine 手动渲染模式），每秒打印电平和正在播放的对象，期间每秒跑一次脚本——不用扬声器就能验证。
+
+**验证**：离线混音测试 6 项（循环、静默启动后 play、stop、音量、single 只播一次、扩展名错误的文件）。真实壁纸：Zero Two、Honkai、"Alone. and Sad." 的音乐正常；Persona 3 昼夜由脚本启动了歌单里的一首加列车环境音；Persona 3 音乐播放器的随机歌单在识别出伪装成 mp3 的 Ogg 后正常播放；dino_run 的跳跃、金币音效只在游戏脚本触发时播放。**还没在真实扬声器上听过**（没有在用户机器上自动启动会放音乐的 App）。
+
+**结果**：用户 16 个下载中完全支持 12 个（上一节为 10 个）。剩余缺口：粒子 2/1、SceneScript 2/1、视频纹理 1/1。
+
+
 ## 7. 待确认
 1. 最低系统版本：建议 macOS 14（SMAppService、ScreenCaptureKit 音频成熟）。
 2. 工程形态：目前采用 SwiftPM + 生成 .app 的脚本（§6.11）；到需要正式签名分发时，再考虑加一个 Xcode 工程来包装。

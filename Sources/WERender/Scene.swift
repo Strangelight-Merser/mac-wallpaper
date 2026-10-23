@@ -218,6 +218,7 @@ public struct SceneDescription {
     /// SceneScript-driven properties per object id.
     public let scripts: [(object: Int, properties: [ScriptedProperty])]
     public let particles: [ParticleSystemDescription]
+    public let sounds: [SoundObject]
     public let drawOrder: [SceneObject]
     public let properties: UserProperties
     /// Objects/effects skipped or approximated, for reporting.
@@ -252,6 +253,7 @@ public struct SceneDescription {
 
         var layers: [ImageLayer] = []
         var particles: [ParticleSystemDescription] = []
+        var sounds: [SoundObject] = []
         var drawOrder: [SceneObject] = []
         var notes: [String] = []
         // WE leaves out values equal to their default. A missing origin is the canvas centre for top-level
@@ -318,8 +320,12 @@ public struct SceneDescription {
                 passes = [pass]
                 text = t
                 if props.bool(obj["opaquebackground"], default: false) { notes.append("\(name): text background not supported") }
+            } else if obj["sound"] != nil {
+                if let sound = SoundObject(object: obj, properties: props) { sounds.append(sound) }
+                else { notes.append("\(name): sound object without files") }
+                continue
             } else {
-                let kind = ["sound", "model", "light"].first { obj[$0] != nil } ?? "other"
+                let kind = ["model", "light"].first { obj[$0] != nil } ?? "other"
                 if kind != "other" || obj["origin"] == nil { notes.append("\(name): \(kind) object not supported") }
                 continue
             }
@@ -421,6 +427,7 @@ public struct SceneDescription {
         }
         self.layers = layers
         self.particles = particles
+        self.sounds = sounds
         self.drawOrder = drawOrder
         self.notes = notes
     }

@@ -28,7 +28,7 @@ public struct Compatibility: Codable, Sendable, Equatable {
 
 /// Checks local assets and unsupported features without needing a GPU for static checks.
 public struct CompatibilityChecker: Sendable {
-    public static let version = 4
+    public static let version = 5
     private let assets: URL?
 
     public init(assets: URL?) { self.assets = assets }
@@ -96,9 +96,9 @@ public struct CompatibilityChecker: Sendable {
         func add(_ feature: Feature) { result.missing[feature, default: 0] += 1 }
         // Scripts run; only the parts they use that are not supported yet show up (deep check warnings).
         for case let object as [String: Any] in raw["objects"] as? [Any] ?? [] {
-            if object["particle"] != nil || object["text"] != nil { continue }
+            if object["particle"] != nil || object["text"] != nil || object["sound"] != nil { continue }
             guard let image = object["image"] as? String else {
-                let kinds: [(String, Feature)] = [("model", .model3D), ("sound", .sound), ("light", .light)]
+                let kinds: [(String, Feature)] = [("model", .model3D), ("light", .light)]
                 if let kind = kinds.first(where: { object[$0.0] != nil }) { add(kind.1) }
                 // Objects with only a transform group their children.
                 else if !object.isEmpty, object["origin"] == nil, object["parent"] == nil { add(.unknownObject) }
@@ -193,7 +193,7 @@ private actor DeepCheck {
                         for layer in scene.scene.layers where warning.hasPrefix(layer.name + ": ") { failedLayers.insert(layer.name) }
                     }
                 }
-                let mappings: [(String, Feature)] = [("model object", .model3D), ("sound object", .sound), ("light object", .light),
+                let mappings: [(String, Feature)] = [("model object", .model3D), ("light object", .light),
                     ("other object", .unknownObject), ("video textures", .videoTexture), ("asset not found", .missingAsset)]
                 if lower.contains(": particle "), lower.hasSuffix("not supported") { warningFeatures[.particles, default: 0] += 1 }
                 if lower.hasPrefix("scenescript"), lower.contains("not supported") || lower.contains("unsupported") {

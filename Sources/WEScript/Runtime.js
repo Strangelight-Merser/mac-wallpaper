@@ -121,8 +121,9 @@
                 return index===null ? null : object(id,'effects['+index+'].');
             },
             getMaterial: pass => material(id,prefix,pass),
-            play() { warn('layer.play'); }, stop() { warn('layer.stop'); },
-            pause() { warn('layer.pause'); }, isPlaying() { warn('layer.isPlaying'); return false; }
+            // Sound layers (other layers ignore these).
+            play: () => { call('sound',id,'play'); }, stop: () => { call('sound',id,'stop'); },
+            pause: () => { call('sound',id,'pause'); }, isPlaying: () => call('sound',id,'isPlaying')
         };
         const proxy=new Proxy(target, {
             get(t,key) {

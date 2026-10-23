@@ -56,11 +56,12 @@ final class LibraryTests: LibraryTestCase {
         for ext in ["vert", "frag"] { try write("partial/shaders/font.\(ext)", "") }
         let partial = await checker.check(WallpaperEntry(folder: partialFolder, root: .userFolder), deep: false)
         XCTAssertEqual(partial.status, .partial)
-        for feature: Feature in [.missingAsset, .model3D, .sound, .light, .missingEffect, .unknownObject] {
+        for feature: Feature in [.missingAsset, .model3D, .light, .missingEffect, .unknownObject] {
             XCTAssertEqual(partial.missing[feature], 1, feature.rawValue)
         }
         XCTAssertNil(partial.missing[.text]) // text objects render
         XCTAssertNil(partial.missing[.sceneScript]) // scripts run
+        XCTAssertNil(partial.missing[.sound]) // sounds play
         let app = try project("app", type: "application")
         let application = await checker.check(WallpaperEntry(folder: app, root: .downloads), deep: false)
         XCTAssertEqual(application.status, .unsupported); XCTAssertEqual(application.missing, [.applicationWallpaper: 1])

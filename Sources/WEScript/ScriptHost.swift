@@ -41,6 +41,12 @@ public protocol SceneScriptHost: AnyObject {
     func effectIndex(object: Int, named name: String) -> Int?
     func sceneValue(_ property: String) -> ScriptValue?
     func setSceneValue(_ value: ScriptValue, property: String)
+    /// Sound layers: "play", "stop", "pause" (result ignored) and "isPlaying".
+    func soundCommand(object: Int, _ command: String) -> Bool
+}
+
+public extension SceneScriptHost {
+    func soundCommand(object: Int, _ command: String) -> Bool { false }
 }
 
 /// A raw scripted property. Static values remain untyped JSON so the renderer can apply its property schema.

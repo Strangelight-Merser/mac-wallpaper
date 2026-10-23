@@ -1,3 +1,4 @@
+import AVFoundation
 import CoreGraphics
 import Foundation
 import Metal
@@ -36,6 +37,19 @@ public final class SceneRenderer: WallpaperRenderer {
     var hiddenEffects: [Int: Set<Int>] = [:]
     /// Layers whose uniform templates scripts changed since their last draw.
     var uniformsDirty = Set<Int>()
+    /// Sound objects play only after `enableSound` (the app); offline renders stay silent.
+    public private(set) var sound: SceneSoundPlayer?
+
+    /// Creates the player for the scene's sound objects (nil if it has none). `offlineFrames` renders the
+    /// mix manually instead of to the output device (tests, `wecli sound`).
+    @discardableResult
+    public func enableSound(offlineFrames: AVAudioFrameCount? = nil) throws -> SceneSoundPlayer? {
+        guard sound == nil, !scene.sounds.isEmpty else { return sound }
+        sound = try SceneSoundPlayer(sounds: scene.sounds, locator: locator, offlineFrames: offlineFrames) { [weak self] in
+            self?.warn($0)
+        }
+        return sound
+    }
     /// Human-readable notes about anything skipped or approximated.
     public private(set) var warnings: [String] = []
     private var warningSet = Set<String>()

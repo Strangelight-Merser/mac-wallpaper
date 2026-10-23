@@ -46,6 +46,11 @@ final class WallpaperController: NSObject, MTKViewDelegate {
     /// This frame's spectrum, shared by all screens.
     private var frameAudio = AudioSpectrum()
 
+    /// Volume of the wallpaper's own sounds (music, effects); 0 = off.
+    var soundVolume: Float = 1 {
+        didSet { updateSound() }
+    }
+
     var fps: Int = 30 {
         didSet {
             webViews.values.forEach { $0.setFPS(effectiveFPS) }
@@ -91,10 +96,13 @@ final class WallpaperController: NSObject, MTKViewDelegate {
                 let r = try Wallpaper.open(project: wallpaper, assets: assets)
                 // Hidden default for A/B measurements: `-disableLayerCache YES`.
                 (r as? SceneRenderer)?.disableLayerCache = UserDefaults.standard.bool(forKey: "disableLayerCache")
+                // Before the warm-up frame: scripts may start sounds from init(). Nothing plays until active.
+                do { try (r as? SceneRenderer)?.enableSound() } catch { log("sound: \(error)") }
                 // Warm-up frame compiles every shader/pipeline before the first on-screen frame.
                 _ = try r.render(width: 64, height: 36, time: 0)
                 DispatchQueue.main.async {
                     self.detachWeb()
+                    (self.renderer as? SceneRenderer)?.sound?.setActive(false)
                     self.renderer = r
                     self.clock = 0
                     self.pointers = [:]
@@ -107,6 +115,7 @@ final class WallpaperController: NSObject, MTKViewDelegate {
             } catch WallpaperError.needsWebKit(let request) {
                 DispatchQueue.main.async {
                     self.detachWeb()
+                    (self.renderer as? SceneRenderer)?.sound?.setActive(false)
                     self.renderer = nil
                     self.webRequest = request
                     self.windows.forEach(self.attachWeb)
@@ -229,6 +238,13 @@ final class WallpaperController: NSObject, MTKViewDelegate {
         }
     }
 
+    /// Wallpaper sounds play while the wallpaper runs and is visible on some screen.
+    func updateSound() {
+        guard let sound = (renderer as? SceneRenderer)?.sound else { return }
+        sound.setMasterVolume(soundVolume)
+        sound.setActive(soundVolume > 0 && pauseReasons.isEmpty && windows.contains(where: isVisible))
+    }
+
     func audioStateChanged() {
         if !audio.isRunning { frameAudio = AudioSpectrum() }
         onStateChange?()
@@ -282,7 +298,7 @@ final class WallpaperController: NSObject, MTKViewDelegate {
     func isVisible(_ w: DesktopWindow) -> Bool { w.occlusionState.contains(.visible) }
 
     func applyState() {
-        defer { updateAudio() }
+        defer { updateAudio(); updateSound() }
         if webRequest != nil {
             // Web content: pause each screen's page while paused or fully covered (setPaused only on change).
             for w in windows {

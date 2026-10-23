@@ -1,3 +1,4 @@
+import AVFoundation
 import CoreGraphics
 import Foundation
 import ImageIO
@@ -24,6 +25,7 @@ func usage() -> Never {
       wecli pkg     <scene.pkg> [outdir]
       wecli scene   <wallpaper dir> [--assets <dir>]   dump layers / passes / effect FBOs
       wecli compare <a.png> <b.png> [--tolerance N] [--diff out.png]   exit 0 = match, 1 = differ
+      wecli sound   <wallpaper dir> --assets <dir> [--seconds N]   mix sound objects offline, print levels
       wecli bench   <wallpaper dir> --assets <dir> [--size WxH] [--frames N] [--cache off] [--layers a,b] [--bloom off] [--fps N]
       wecli render  <wallpaper dir> --assets <WE assets dir> [--time t] [--size WxH] [--prop name=value]...
                     [--layers a,b] [--bloom off] [--cache off] [--warm t] [--target _rt_name] --out <out.png>
@@ -420,6 +422,37 @@ case "compare":
         try writePNG(img, to: URL(fileURLWithPath: path))
     }
     exit(over == 0 ? 0 : 1)
+
+case "sound":
+    // Mix a scene's sound objects offline and print the level of every second (no audio device needed).
+    var opts: [String: String] = [:]
+    var i = 3
+    while i + 1 < args.count { opts[args[i]] = args[i + 1]; i += 2 }
+    let seconds = Int(opts["--seconds"] ?? "10") ?? 10
+    let renderer = try SceneRenderer(project: URL(fileURLWithPath: args[2]),
+                                     assets: opts["--assets"].map { URL(fileURLWithPath: $0) })
+    let chunk: AVAudioFrameCount = 4800
+    guard let player = try renderer.enableSound(offlineFrames: chunk) else { print("no sound objects"); exit(0) }
+    for s in renderer.scene.sounds {
+        print("\(s.id) \(s.name): \(s.mode.rawValue), volume \(s.volume)\(s.startSilent ? ", starts silent" : ""), \(s.files.count) file(s)")
+    }
+    player.setActive(true)
+    for second in 0..<seconds {
+        // Run scripts once a second (they may start or stop sounds), then mix the second in 0.1 s chunks.
+        _ = try renderer.render(width: 16, height: 16, time: Float(second))
+        var sum: Double = 0, peak: Float = 0, count = 0
+        for _ in 0..<10 {
+            let buffer = try player.renderOffline(frames: chunk)
+            for c in 0..<Int(buffer.format.channelCount) {
+                let data = buffer.floatChannelData![c]
+                for f in 0..<Int(buffer.frameLength) { sum += Double(data[f] * data[f]); peak = max(peak, abs(data[f])) }
+                count += Int(buffer.frameLength)
+            }
+        }
+        let playing = renderer.scene.sounds.filter { player.isPlaying($0.id) }.map { "\($0.id)" }.joined(separator: ",")
+        print(String(format: "%3ds  rms %.4f  peak %.3f  playing [%@]", second, (sum / Double(max(count, 1))).squareRoot(), peak, playing))
+    }
+    for w in renderer.warnings where w.hasPrefix("sound") { print("  warning: \(w)") }
 
 case "bench":
     // Encode N frames as the app would (≤3 in flight), reporting CPU encode time and GPU time per frame.
