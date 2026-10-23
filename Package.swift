@@ -81,6 +81,7 @@ let package = Package(
             ]
         ),
         .target(name: "WEShader", dependencies: ["WEFormat", "CShaderTools"]),
+        .testTarget(name: "WEShaderTests", dependencies: ["WEShader", "WEFormat"]),
         .target(name: "WEVideo"),
         .target(name: "CSteamSupport", linkerSettings: [.linkedLibrary("lzma"), .linkedLibrary("z")]),
         .target(name: "WESteam", dependencies: ["CSteamSupport"],
