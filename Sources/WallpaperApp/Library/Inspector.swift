@@ -1,5 +1,6 @@
 import SwiftUI
 import WELibrary
+import WERender
 
 struct Inspector: View {
     let model: LibraryModel
@@ -41,6 +42,10 @@ struct Inspector: View {
                         .menuIndicator(.hidden)
                         .fixedSize()
                         .controlSize(.large)
+                    }
+
+                    if entry.type == .scene || entry.type == .video {
+                        DisplayModeSection(model: model, entry: entry)
                     }
 
                     CompatibilitySection(compatibility: entry.compatibility)
@@ -169,5 +174,34 @@ private struct FlowLayout: Layout {
         }
         if !items.isEmpty { rows.append((items, y, x - spacing, height)) }
         return rows
+    }
+}
+
+/// How the wallpaper fills a screen of another shape.
+struct DisplayModeSection: View {
+    let model: LibraryModel
+    let entry: WallpaperEntry
+
+    var body: some View {
+        let mode = model.contentMode(for: entry)
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Display").font(.headline)
+            Picker("Display", selection: Binding(get: { mode }, set: { model.setContentMode($0, for: entry) })) {
+                Text("Fill").tag(WERender.ContentMode.fill)
+                Text("Fit").tag(WERender.ContentMode.fit)
+                Text("Stretch").tag(WERender.ContentMode.stretch)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            Group {
+                switch mode {
+                case WERender.ContentMode.fill: Text("Covers the screen; edges may be cut off.")
+                case WERender.ContentMode.fit: Text("Shows the whole picture, with bars if the screen is a different shape.")
+                case WERender.ContentMode.stretch: Text("Fills the screen exactly; the picture may look squashed.")
+                }
+            }
+            .font(.callout)
+            .foregroundStyle(.secondary)
+        }
     }
 }

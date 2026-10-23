@@ -22,6 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self?.defaults.set(entry.folder.path, forKey: "wallpaper")
             self?.loadCurrent()
         }
+        model.contentModeChanged = { [weak self] mode in self?.controller.contentMode = mode }
         return model
     }()
     lazy var steamModel = SteamModel(library: libraryModel)
@@ -65,6 +66,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             statusLine.title = String(localized: "No wallpaper — choose one…")
             return
         }
+        controller.contentMode = LibraryModel.storedContentMode(path: path)
         controller.load(wallpaper: URL(fileURLWithPath: path),
                         assets: defaults.string(forKey: "assets").map { URL(fileURLWithPath: $0) })
         libraryModel.currentPath = path

@@ -1,6 +1,7 @@
 import AppKit
 import Observation
 import WELibrary
+import WERender
 
 /// What the sidebar selects: a type filter or one source of wallpapers.
 enum LibrarySection: Hashable {
@@ -39,6 +40,10 @@ final class LibraryModel {
     private let defaults = UserDefaults.standard
     /// Set by the app delegate: shows a wallpaper on the desktop.
     var apply: (WallpaperEntry) -> Void = { _ in }
+    /// Set by the app delegate: the current wallpaper's display mode changed.
+    var contentModeChanged: (ContentMode) -> Void = { _ in }
+    /// Display mode per wallpaper folder (only non-default choices are stored).
+    private(set) var contentModes: [String: String] = UserDefaults.standard.dictionary(forKey: "contentModes") as? [String: String] ?? [:]
 
     init() {
         folders = (UserDefaults.standard.stringArray(forKey: "libraryFolders") ?? []).map { URL(fileURLWithPath: $0) }
@@ -159,6 +164,22 @@ final class LibraryModel {
         guard let id = entry.workshopID,
               let url = URL(string: "https://steamcommunity.com/sharedfiles/filedetails/?id=\(id)") else { return }
         NSWorkspace.shared.open(url)
+    }
+
+    func contentMode(for entry: WallpaperEntry) -> ContentMode {
+        contentModes[entry.folder.standardizedFileURL.path].flatMap(ContentMode.init(rawValue:)) ?? .fill
+    }
+
+    func setContentMode(_ mode: ContentMode, for entry: WallpaperEntry) {
+        contentModes[entry.folder.standardizedFileURL.path] = mode == .fill ? nil : mode.rawValue
+        defaults.set(contentModes, forKey: "contentModes")
+        if isCurrent(entry) { contentModeChanged(mode) }
+    }
+
+    /// The stored display mode of a wallpaper folder, for the app at load time.
+    static func storedContentMode(path: String) -> ContentMode {
+        let modes = UserDefaults.standard.dictionary(forKey: "contentModes") as? [String: String] ?? [:]
+        return modes[URL(fileURLWithPath: path).standardizedFileURL.path].flatMap(ContentMode.init(rawValue:)) ?? .fill
     }
 
     func isCurrent(_ entry: WallpaperEntry) -> Bool {

@@ -46,6 +46,11 @@ final class WallpaperController: NSObject, MTKViewDelegate {
     /// This frame's spectrum, shared by all screens.
     private var frameAudio = AudioSpectrum()
 
+    /// How the wallpaper maps onto screens of another shape (per wallpaper, set by the app delegate).
+    var contentMode: ContentMode = .fill {
+        didSet { renderer?.contentMode = contentMode }
+    }
+
     /// Volume of the wallpaper's own sounds (music, effects); 0 = off.
     var soundVolume: Float = 1 {
         didSet { updateSound() }
@@ -103,6 +108,7 @@ final class WallpaperController: NSObject, MTKViewDelegate {
                 DispatchQueue.main.async {
                     self.detachWeb()
                     (self.renderer as? SceneRenderer)?.sound?.setActive(false)
+                    r.contentMode = self.contentMode
                     self.renderer = r
                     self.clock = 0
                     self.pointers = [:]

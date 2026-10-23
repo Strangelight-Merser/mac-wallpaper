@@ -146,3 +146,10 @@
 "Retry" = "重试";
 "macOS didn’t allow access to the saved Steam login. Log in again." = "macOS 没有允许读取已保存的 Steam 登录，请重新登录。";
 "Log in to Steam to see your subscriptions." = "登录 Steam 后才能看到你的订阅。";
+"Display" = "显示方式";
+"Fill" = "铺满";
+"Fit" = "完整显示";
+"Stretch" = "拉伸";
+"Covers the screen; edges may be cut off." = "铺满屏幕，边缘可能被裁掉。";
+"Shows the whole picture, with bars if the screen is a different shape." = "显示完整画面，屏幕比例不同时两侧会留出黑边。";
+"Fills the screen exactly; the picture may look squashed." = "完全贴合屏幕，画面可能被压扁或拉长。";
