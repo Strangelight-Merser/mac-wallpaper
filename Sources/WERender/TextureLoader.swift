@@ -3,6 +3,7 @@ import Foundation
 import ImageIO
 import Metal
 import WEFormat
+import WEVideo
 
 /// GPU texture plus the sizes shaders see through `g_TextureNResolution`.
 public struct LoadedTexture {
@@ -13,11 +14,15 @@ public struct LoadedTexture {
     /// WE `FORMAT_*` code (common_fragment.h) shaders see as `TEX<n>FORMAT`: 0 RGBA8888, 4 DXT5,
     /// 6 DXT3, 7 DXT1, 8 RG88, 9 R8, 10 RG1616F, 11 R16F.
     public var formatCode: Int = 0
+    var video: VideoTexture? = nil
+    var videoFrame: VideoTextureFrame? = nil
 }
 
 enum TextureLoader {
     /// Load `materials/<name>.tex` via the locator and upload all mip levels.
-    static func load(_ name: String, locator: AssetLocator, device: MTLDevice) throws -> LoadedTexture {
+    static func load(_ name: String, locator: AssetLocator, device: MTLDevice,
+                     videos: inout [URL: VideoTexture], time: Double,
+                     commandBuffer: MTLCommandBuffer?) throws -> LoadedTexture {
         let tex = try Tex(data: locator.data("materials/\(name).tex"))
         guard let mips = tex.images.first, let top = mips.first else { throw WEFormatError.corrupt("\(name): no images") }
 
@@ -59,7 +64,10 @@ enum TextureLoader {
             texture = t
             allocated = SIMD2(Float(w), Float(h))
         case .mp4:
-            throw WEFormatError.unsupported("\(name): video textures")
+            let url = try VideoTextureCache.store(top.bytes)
+            let video = try videos[url] ?? VideoTexture(url: url, device: device)
+            videos[url] = video
+            return try video.frame(at: time, clamp: tex.flags.contains(.clampUVs), commandBuffer: commandBuffer)
         }
         var formatCode = 0 // embedded PNG/JPEG decode to RGBA
         if case .raw(let f) = top.payload {

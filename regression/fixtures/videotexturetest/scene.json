@@ -1,0 +1,7 @@
+{
+  "general": {"clearcolor":"0 0 0", "orthogonalprojection":{"width":64,"height":32}},
+  "objects": [
+    {"id":1,"name":"left","image":"models/video.json","origin":"16 16 0","size":"32 32","visible":true},
+    {"id":2,"name":"right shared video","image":"models/video.json","origin":"48 16 0","size":"32 32","visible":true}
+  ]
+}

@@ -181,3 +181,9 @@ fixture/scripttest.press            regression/fixtures/scripttest              
 # leave the scene unchanged (it once stretched the region behind it over the whole frame); with one,
 # only its quad changes.
 fixture/composetest                 regression/fixtures/composetest                      --time 1 --size 768x256
+
+# Synthetic 16x16 video shared by two layers: red at 0, blue at 1, loops at 2.
+fixture/videotexturetest.t0          regression/fixtures/videotexturetest                  --time 0 --size 256x128
+fixture/videotexturetest.t1          regression/fixtures/videotexturetest                  --time 1 --size 256x128
+fixture/videotexturetest.cached      regression/fixtures/videotexturetest                  --time 1 --warm 0 --size 256x128
+fixture/videotexturetest.loop        regression/fixtures/videotexturetest                  --time 2 --warm 1 --size 256x128
