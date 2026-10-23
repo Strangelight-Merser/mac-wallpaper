@@ -35,6 +35,8 @@ IDENTITY=$(print -r -- "$IDENTITIES" | sed -n 's/.*"\(Apple Development: [^"]*\)
 [[ -z $IDENTITY ]] && print -r -- "$IDENTITIES" | grep -q '"mac-wallpaper development"' && IDENTITY="mac-wallpaper development"
 if [[ -n $IDENTITY ]]; then
   codesign --force --sign "$IDENTITY" $APP
+  # wecli reads the same Steam login, so it needs the same team signature (and a fixed identifier).
+  codesign --force --sign "$IDENTITY" --identifier dev.macwallpaper.wecli $BIN/wecli
 else
   codesign --force --sign - $APP >/dev/null 2>&1 || true
 fi
