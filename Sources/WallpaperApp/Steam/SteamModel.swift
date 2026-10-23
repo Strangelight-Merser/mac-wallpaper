@@ -34,6 +34,7 @@ final class SteamModel {
     /// Checked rows in the import sheet.
     var chosen: Set<UInt64> = []
     let queue: DownloadQueue
+    let connection = SteamConnection()
 
     /// How this Mac appears in Steam's list of authorized devices.
     let deviceName = "mac-wallpaper on " + (Host.current().localizedName ?? "Mac")
@@ -41,7 +42,7 @@ final class SteamModel {
     private var guardContinuation: CheckedContinuation<(SteamGuardConfirmation.Kind, String?), Error>?
 
     init(library: LibraryModel) {
-        queue = DownloadQueue(library: library)
+        queue = DownloadQueue(library: library, connection: connection)
     }
 
     /// Reads the saved login (may show a Keychain prompt for development builds).
@@ -49,7 +50,7 @@ final class SteamModel {
         guard !accountLoaded else { return }
         accountLoaded = true
         account = try? SteamKeychain.load()
-        queue.account = account
+        connection.account = account
     }
 
     // MARK: - login
@@ -132,7 +133,7 @@ final class SteamModel {
         do { try SteamKeychain.save(tokens) } catch { login = .failed(Self.message(error)); return }
         account = tokens
         accountLoaded = true
-        queue.account = tokens
+        connection.account = tokens
         login = .idle
         loginSheetShown = false
         // Right after logging in, offer to bring over what the user subscribed to in Wallpaper Engine.
@@ -142,7 +143,7 @@ final class SteamModel {
     func signOut() {
         if let name = account?.accountName { try? SteamKeychain.delete(account: name) }
         account = nil
-        queue.account = nil
+        connection.account = nil
         subscriptions = []
         subscriptionsState = .idle
     }
@@ -157,18 +158,15 @@ final class SteamModel {
     func loadSubscriptions() async {
         guard let account, subscriptionsState != .loading else { return }
         subscriptionsState = .loading
-        let client = SteamCMClient(machineName: deviceName)
         do {
-            try await client.connect()
-            _ = try await client.logOn(account)
-            let ids = try await SteamWorkshop().subscriptions(client: client, tokens: account).ids
-            await client.disconnect()
+            let ids = try await connection.run { client, _ in
+                try await SteamWorkshop().subscriptions(client: client, tokens: account).ids
+            }
             let items = try await SteamWorkshop().details(ids).filter { $0.result == 1 }
             subscriptions = items.sorted { $0.timeUpdated > $1.timeUpdated }
             chosen = Set(items.filter { isDefaultChoice($0) }.map(\.id))
             subscriptionsState = .loaded
         } catch {
-            await client.disconnect()
             subscriptionsState = .failed(Self.message(error))
         }
     }
@@ -218,4 +216,62 @@ func qrImage(_ url: URL, pointSize: CGFloat = 220) -> NSImage? {
     let image = scaled.composited(over: CIImage(color: .white).cropped(to: rect))
     guard let cg = CIContext().createCGImage(image, from: rect) else { return nil }
     return NSImage(cgImage: cg, size: NSSize(width: pointSize, height: pointSize))
+}
+
+/// The app's single Steam session. Every CM login from this Mac presents the same machine identity, so a
+/// second connection makes Steam drop the first (EResult 34, LogonSessionReplaced); subscriptions and
+/// downloads therefore share this one and reconnect through it.
+@MainActor
+final class SteamConnection {
+    var account: SteamTokens? { didSet { if oldValue != account { Task { await close() } } } }
+    private var client: SteamCMClient?
+    private var session: SteamSession?
+    private var connecting: Task<(SteamCMClient, SteamSession), Error>?
+
+    func get() async throws -> (SteamCMClient, SteamSession) {
+        if let client, let session { return (client, session) }
+        if let connecting { return try await connecting.value }
+        guard let account else { throw SteamError.invalidToken }
+        let task = Task { () throws -> (SteamCMClient, SteamSession) in
+            let c = SteamCMClient(machineName: "mac-wallpaper")
+            try await c.connect()
+            return (c, try await c.logOn(account))
+        }
+        connecting = task
+        defer { connecting = nil }
+        let result = try await task.value
+        (client, session) = result
+        return result
+    }
+
+    /// Runs `body` with the session; if the session turns out to be gone, reconnects and tries again.
+    func run<T>(attempts: Int = 3, _ body: (SteamCMClient, SteamSession) async throws -> T) async throws -> T {
+        var attempt = 1
+        while true {
+            do {
+                let (client, session) = try await get()
+                return try await body(client, session)
+            } catch where attempt < attempts && Self.isSessionLoss(error) {
+                attempt += 1
+                await close()
+            }
+        }
+    }
+
+    func close() async {
+        let old = client
+        client = nil; session = nil
+        await old?.disconnect()
+    }
+
+    /// Errors that mean "this CM session is no longer usable" rather than "this request is wrong".
+    static func isSessionLoss(_ error: Error) -> Bool {
+        switch error {
+        case SteamError.disconnected, SteamError.timeout, SteamError.transport: true
+        // steam-user/enums/EResult.js: InvalidPassword (5, also seen when a session is replaced),
+        // LogonSessionReplaced (34), ServiceUnavailable (20), TryAnotherCM (48).
+        case SteamError.result(let n): [5, 20, 34, 48].contains(n)
+        default: false
+        }
+    }
 }

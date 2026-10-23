@@ -162,7 +162,7 @@ struct DownloadsPopover: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
                     ForEach(queue.downloads) { download in
-                        DownloadRow(download: download) { queue.cancel(download.id) }
+                        DownloadRow(download: download, cancel: { queue.cancel(download.id) }, retry: { queue.retry(download.id) })
                     }
                 }
             }
@@ -176,6 +176,7 @@ struct DownloadsPopover: View {
 private struct DownloadRow: View {
     let download: DownloadQueue.Download
     let cancel: () -> Void
+    let retry: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -201,10 +202,19 @@ private struct DownloadRow: View {
                 Label { Text("Added to the library") } icon: { Image(systemName: "checkmark.circle.fill").foregroundStyle(.green) }
                     .font(.caption)
             case .failed(let message):
-                Label { Text(message) } icon: { Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange) }
-                    .font(.caption)
+                HStack {
+                    Label { Text(message) } icon: { Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange) }
+                    Spacer()
+                    Button(action: retry) { Text("Retry") }.buttonStyle(.link)
+                }
+                .font(.caption)
             case .cancelled:
-                Text("Cancelled").font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    Text("Cancelled").foregroundStyle(.secondary)
+                    Spacer()
+                    Button(action: retry) { Text("Retry") }.buttonStyle(.link)
+                }
+                .font(.caption)
             }
         }
     }

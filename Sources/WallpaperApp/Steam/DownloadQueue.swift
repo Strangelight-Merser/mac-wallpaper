@@ -24,14 +24,12 @@ final class DownloadQueue {
     }
 
     private(set) var downloads: [Download] = []
-    var account: SteamTokens?
     let library: LibraryModel
+    private let connection: SteamConnection
     private var runner: Task<Void, Never>?
     private var current: (id: UInt64, task: Task<Void, Error>)?
-    private var client: SteamCMClient?
-    private var session: SteamSession?
 
-    init(library: LibraryModel) { self.library = library }
+    init(library: LibraryModel, connection: SteamConnection) { self.library = library; self.connection = connection }
 
     var activeCount: Int { downloads.filter(\.isActive).count }
     /// 0…1 over the active downloads (finished ones count as done).
@@ -66,6 +64,12 @@ final class DownloadQueue {
 
     func clearFinished() { downloads.removeAll { !$0.isActive } }
 
+    /// Queues a failed or cancelled item again; files already verified in its staging folder are kept.
+    func retry(_ id: UInt64) {
+        guard let item = downloads.first(where: { $0.id == id && !$0.isActive && $0.state != .finished })?.item else { return }
+        enqueue([item])
+    }
+
     private func run() async {
         while let index = downloads.firstIndex(where: { $0.state == .queued }) {
             let item = downloads[index].item
@@ -82,25 +86,22 @@ final class DownloadQueue {
             } catch {
                 set(item.id, .failed(SteamModel.message(error)))
                 log("workshop \(item.id) failed: \(error)")
-                // A broken connection is rebuilt for the next item.
-                await client?.disconnect(); client = nil; session = nil
             }
             current = nil
         }
-        await client?.disconnect(); client = nil; session = nil
         runner = nil
     }
 
+    /// Retried on a fresh session if Steam drops the current one; verified files from the previous
+    /// attempt stay in the staging folder and are not downloaded again.
     private func download(_ item: WorkshopItem) async throws {
-        guard let account else { throw SteamError.invalidToken }
         set(item.id, .preparing)
-        if client == nil || session == nil {
-            let c = SteamCMClient(machineName: "mac-wallpaper")
-            try await c.connect()
-            session = try await c.logOn(account)
-            client = c
+        try await connection.run { client, session in
+            try await self.download(item, client: client, session: session)
         }
-        guard let client, let session else { throw SteamError.disconnected }
+    }
+
+    private func download(_ item: WorkshopItem, client: SteamCMClient, session: SteamSession) async throws {
         let downloader = WorkshopDownloader(client: client, session: session)
         let plan = try await downloader.plan(item)
         let dest = LibraryRoots.downloads.url.appendingPathComponent(String(item.id), isDirectory: true)
