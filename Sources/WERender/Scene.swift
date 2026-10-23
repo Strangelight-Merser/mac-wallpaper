@@ -25,7 +25,12 @@ public struct UserProperties {
             if let n = name, let value = values[n] {
                 // {"user": {"name": "x", "condition": "y"}}: compare against the condition when present
                 if let cond = (user as? [String: Any])?["condition"] {
-                    return String(describing: value) == String(describing: cond)
+                    let a = String(describing: value), b = String(describing: cond)
+                    func number(_ s: String) -> Double? {
+                        Double(s) ?? (s == "true" ? 1 : s == "false" ? 0 : nil)
+                    }
+                    if let a = number(a), let b = number(b) { return a == b }
+                    return a == b
                 }
                 return value
             }
@@ -77,12 +82,12 @@ public struct SceneDescription {
         /// Effect passes: index of the scene.json pass override (`effects[k].passes[j]`) this pass came from.
         public var overrideIndex: Int?
 
-        init(material: [String: Any], label: String) {
+        init(material: [String: Any], label: String, properties: UserProperties = UserProperties(project: [:])) {
             shader = material["shader"] as? String ?? "genericimage"
-            textures = (material["textures"] as? [Any] ?? []).map { $0 as? String }
+            textures = (material["textures"] as? [Any] ?? []).map { properties.resolve($0) as? String }
             blending = material["blending"] as? String ?? "normal"
-            constants = material["constantshadervalues"] as? [String: Any] ?? [:]
-            combos = Self.intCombos(material["combos"])
+            constants = (material["constantshadervalues"] as? [String: Any] ?? [:]).mapValues { properties.resolve($0) ?? NSNull() }
+            combos = Self.intCombos((material["combos"] as? [String: Any])?.mapValues { properties.resolve($0) ?? NSNull() })
             self.label = label
         }
 
@@ -98,15 +103,15 @@ public struct SceneDescription {
         }
 
         static func intCombos(_ v: Any?) -> [String: Int] {
-            (v as? [String: Any] ?? [:]).compactMapValues { ($0 as? NSNumber)?.intValue }
+            (v as? [String: Any] ?? [:]).compactMapValues { parseFloats($0)?.first.map(Int.init) }
         }
 
         /// Apply an effect instance's per-pass override (from scene.json).
         mutating func apply(override o: [String: Any], properties: UserProperties) {
-            for (k, v) in Self.intCombos(o["combos"]) { combos[k] = v }
+            for (k, v) in Self.intCombos((o["combos"] as? [String: Any])?.mapValues { properties.resolve($0) ?? NSNull() }) { combos[k] = v }
             for (k, v) in o["constantshadervalues"] as? [String: Any] ?? [:] { constants[k] = properties.resolve(v) }
             for (i, t) in (o["textures"] as? [Any] ?? []).enumerated() {
-                guard let name = t as? String else { continue }
+                guard let name = properties.resolve(t) as? String else { continue }
                 while textures.count <= i { textures.append(nil) }
                 textures[i] = name
             }
@@ -179,7 +184,7 @@ public struct SceneDescription {
         public let text: TextObject?
         /// scene.json effect index (`effects[k]`) → index into `effectNames`.
         public let effectSlots: [Int: Int]
-        /// Effects kept only because a script controls their visibility, hidden at load.
+        /// Effects kept because a script or user property controls their visibility, hidden at load.
         public let hiddenEffects: Set<Int>
     }
 
@@ -206,9 +211,9 @@ public struct SceneDescription {
     }
 
     public let canvas: SIMD2<Float>
-    public let clearColor: SIMD3<Float>
+    public internal(set) var clearColor: SIMD3<Float>
     public let hdr: Bool
-    public let bloom: (enabled: Bool, strength: Float, threshold: Float)
+    public internal(set) var bloom: (enabled: Bool, strength: Float, threshold: Float)
     public let parallax: Parallax
     let particleCamera: (fov: Float, near: Float, far: Float)
     public internal(set) var layers: [ImageLayer]
@@ -218,9 +223,10 @@ public struct SceneDescription {
     /// SceneScript-driven properties per object id.
     public let scripts: [(object: Int, properties: [ScriptedProperty])]
     public let particles: [ParticleSystemDescription]
-    public let sounds: [SoundObject]
+    public internal(set) var sounds: [SoundObject]
     public let drawOrder: [SceneObject]
-    public let properties: UserProperties
+    public internal(set) var properties: UserProperties
+    public private(set) var userBindings: [UserBinding] = []
     /// Objects/effects skipped or approximated, for reporting.
     public let notes: [String]
 
@@ -235,6 +241,7 @@ public struct SceneDescription {
         properties = props
         let scene = try locator.json(file)
         let general = scene["general"] as? [String: Any] ?? [:]
+        userBindings += UserBinding.discover(general, object: nil)
         func f(_ k: String, _ d: Float) -> Float { parseFloats(props.resolve(general[k]))?.first ?? d }
         particleCamera = (f("fov", 50), f("nearz", 0.01), f("farz", 10000))
         let ortho = general["orthogonalprojection"] as? [String: Any]
@@ -278,6 +285,7 @@ public struct SceneDescription {
                                   origin: v3("origin", 0), scale: v3("scale", 1), angles: v3("angles", 0),
                                   visible: props.bool(o["visible"]))
             nodeOrder.append(id)
+            userBindings += UserBinding.discover(o, object: id)
             let scripted = ScriptedProperty.discover(in: o)
             if !scripted.isEmpty { scripts.append((id, scripted)) }
         }
@@ -306,11 +314,13 @@ public struct SceneDescription {
             var model: [String: Any] = [:]
             var passes: [Pass]
             var text: TextObject?
-            if let image = obj["image"] as? String {
+            if let image = props.resolve(obj["image"]) as? String {
                 model = try locator.json(image)
+                userBindings += UserBinding.discover(model, object: (obj["id"] as? NSNumber)?.intValue, path: "model")
                 guard let matPath = model["material"] as? String else { notes.append("\(name): no material"); continue }
                 let material = try locator.json(matPath)
-                passes = (material["passes"] as? [[String: Any]] ?? []).map { Pass(material: $0, label: "base") }
+                userBindings += UserBinding.discover(material, object: (obj["id"] as? NSNumber)?.intValue, path: "material")
+                passes = (material["passes"] as? [[String: Any]] ?? []).map { Pass(material: $0, label: "base", properties: props) }
             } else if obj["text"] != nil {
                 // WE draws glyph coverage with the `font` shader (g_Color4 = colour, alpha) into the text box.
                 let t = TextObject(object: obj, properties: props)
@@ -334,13 +344,14 @@ public struct SceneDescription {
             var effectFBOs: [[EffectFBO]] = []
             var effectSlots: [Int: Int] = [:], hiddenEffects = Set<Int>()
             for (slot, eff) in (obj["effects"] as? [Any] ?? []).enumerated() {
-                guard let eff = eff as? [String: Any], let file = eff["file"] as? String else { continue }
+                guard let eff = eff as? [String: Any], let file = props.resolve(eff["file"]) as? String else { continue }
                 let ename = (file as NSString).deletingLastPathComponent.components(separatedBy: "/").last ?? file
                 let shown = props.bool(eff["visible"])
-                // Hidden effects are dropped unless a script may show them.
-                guard shown || (eff["visible"] as? [String: Any])?["script"] != nil else { continue }
+                // Hidden effects are kept when scripts or user properties can show them.
+                guard shown || (eff["visible"] as? [String: Any])?["script"] != nil || (eff["visible"] as? [String: Any])?["user"] != nil else { continue }
                 do {
                     let def = try locator.json(file)
+                    userBindings += UserBinding.discover(def, object: (obj["id"] as? NSNumber)?.intValue, path: "effectDefinition[\(slot)]")
                     let effectIndex = effectNames.count
                     var overrides = (eff["passes"] as? [[String: Any]] ?? [])[...]
                     var overrideIndex = 0
@@ -370,8 +381,10 @@ public struct SceneDescription {
                                 if !c.isEmpty { bindConditions[i] = c }
                             }
                         }
-                        for mpass in (try locator.json(mp))["passes"] as? [[String: Any]] ?? [] {
-                            var pass = Pass(material: mpass, label: ename)
+                        let material = try locator.json(mp)
+                        userBindings += UserBinding.discover(material, object: (obj["id"] as? NSNumber)?.intValue, path: "effectMaterial[\(slot)][\(overrideIndex)]")
+                        for mpass in material["passes"] as? [[String: Any]] ?? [] {
+                            var pass = Pass(material: mpass, label: ename, properties: props)
                             pass.apply(override: o, properties: props)
                             pass.effect = effectIndex
                             pass.overrideIndex = overrideIndex
@@ -425,6 +438,7 @@ public struct SceneDescription {
                 text: text,
                 effectSlots: effectSlots, hiddenEffects: hiddenEffects))
         }
+        userBindings += particles.flatMap(\.userBindings)
         self.layers = layers
         self.particles = particles
         self.sounds = sounds

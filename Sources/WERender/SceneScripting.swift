@@ -89,13 +89,23 @@ extension SceneRenderer {
         cursor.down = down
     }
 
-    private func startScripts() {
-        // CLI/app overrides arrive as strings: give scripts booleans and numbers.
-        let users = scene.properties.values.mapValues { v -> Any in
-            guard let s = v as? String else { return v }
+    var scriptUserValues: [String: Any] {
+        func typed(_ value: Any) -> Any {
+            guard let s = value as? String else { return value }
             if s == "true" || s == "false" { return s == "true" }
             return Double(s) ?? s
         }
+        var values = scene.properties.values.mapValues(typed)
+        for binding in scene.userBindings where binding.path.contains(".scriptproperties.") {
+            if let object = binding.object, let value = scene.properties.resolve(binding.raw) {
+                values["__binding.\(object).\(binding.path)"] = typed(value)
+            }
+        }
+        return values
+    }
+
+    private func startScripts() {
+        let users = scriptUserValues
         let engine = SceneScriptEngine(host: self, userProperties: users,
                                        canvasSize: SIMD2(Double(scene.canvas.x), Double(scene.canvas.y)),
                                        storageURL: scriptStorageURL, fixedClock: scriptClock)
@@ -104,7 +114,14 @@ extension SceneRenderer {
             for p in properties {
                 let initial = value(object: object, property: p.path)
                     ?? Self.scriptValue(p.staticValue, vectors: p.path != "text") ?? .null
-                engine.addScript(object: object, path: p.path, source: p.source, scriptProperties: p.scriptProperties,
+                var boundProperties = p.scriptProperties
+                for (key, raw) in p.scriptProperties {
+                    if let binding = raw as? [String: Any], binding["user"] != nil {
+                        boundProperties[key] = ["user": "__binding.\(object).\(p.path).scriptproperties.\(key)",
+                                                "value": binding["value"] ?? NSNull()]
+                    }
+                }
+                engine.addScript(object: object, path: p.path, source: p.source, scriptProperties: boundProperties,
                                  initialValue: initial)
             }
             if let i = layerIndexByID[object] { scriptedLayers.insert(i) }
@@ -114,8 +131,8 @@ extension SceneRenderer {
     /// scene.json values: "x y z" strings become vectors (except where a string is meant, like text).
     static func scriptValue(_ v: Any?, vectors: Bool) -> ScriptValue? {
         switch v {
-        case let b as Bool: return .bool(b)
-        case let n as NSNumber: return .number(n.doubleValue)
+        case let n as NSNumber:
+            return CFGetTypeID(n) == CFBooleanGetTypeID() ? .bool(n.boolValue) : .number(n.doubleValue)
         case let s as String:
             guard vectors, let f = parseFloats(s), f.count >= 2, f.count <= 4,
                   s.split(separator: " ").count == f.count else { return .string(s) }
@@ -262,7 +279,10 @@ extension SceneRenderer: SceneScriptHost {
             uniformsDirty.insert(i)
             return
         case "volume":
-            if let f = Self.floats(value)?.first { sound?.setVolume(id, f) }
+            if let f = Self.floats(value)?.first {
+                if let i = scene.sounds.firstIndex(where: { $0.id == id }) { scene.sounds[i].volume = max(0, f) }
+                sound?.setVolume(id, f)
+            }
             return
         case "horizontalalign", "verticalalign", "maxwidth", "pointsize", "padding":
             guard let i = layerIndex, var t = textObject(i) else { return }

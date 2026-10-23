@@ -481,7 +481,7 @@ public final class SceneRenderer: WallpaperRenderer {
 
         let w = max(1, Int(size.x.rounded())), h = max(1, Int(size.y.rounded()))
         // Hidden layers render into their composite FBO instead of the scene, for other layers to read.
-        let toScene = layer.fullscreen || scene.nodes[layer.id] == nil ? layer.visible : isVisible(layer.id)
+        let toScene = scene.nodes[layer.id] == nil ? layer.visible : isVisible(layer.id)
         let fbo = (passes.count > 1 || !toScene) ? compositeTargets(index, w, h) : []
         let model = layerModel(index)
         effectProjection = Self.effectTextureProjection(projection * model, half: size / 2)

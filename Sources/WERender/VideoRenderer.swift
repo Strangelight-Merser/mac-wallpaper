@@ -8,6 +8,8 @@ import WEVideo
 /// Video wallpapers: decoded BGRA frames (VideoToolbox, via `VideoSource`) imported zero-copy into Metal
 /// and mapped to the output according to `contentMode`.
 public final class VideoRenderer: WallpaperRenderer {
+    public func setUserProperties(_ values: [String: String]) -> Bool { true }
+
     public var contentMode: ContentMode = .fill
     public var barColor = SIMD3<Float>(repeating: 0)
     public let device: MTLDevice

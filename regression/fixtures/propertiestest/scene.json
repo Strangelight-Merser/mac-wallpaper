@@ -1,0 +1,107 @@
+{
+  "general": {
+    "orthogonalprojection": {
+      "width": 512,
+      "height": 256
+    },
+    "clearcolor": {
+      "user": "background",
+      "value": "0 0 0"
+    },
+    "bloom": {
+      "user": "bloom",
+      "value": false
+    },
+    "bloomstrength": {
+      "user": "strength",
+      "value": 0.4
+    }
+  },
+  "objects": [
+    {
+      "id": 1,
+      "name": "Cloud",
+      "image": {
+        "user": "file",
+        "value": "models/clouds.json"
+      },
+      "origin": {
+        "user": "position",
+        "value": "180 150 0"
+      },
+      "scale": {
+        "user": "scale",
+        "value": "1 1 1"
+      },
+      "angles": {
+        "user": "angles",
+        "value": "0 0 0"
+      },
+      "size": "240 160",
+      "visible": {
+        "user": "shown",
+        "value": true
+      },
+      "alpha": {
+        "user": "opacity",
+        "value": 1
+      },
+      "color": {
+        "user": "tint",
+        "value": "1 1 1"
+      },
+      "effects": [
+        {
+          "file": "effects/tint/effect.json",
+          "visible": {
+            "user": {
+              "name": "mode",
+              "condition": 1
+            },
+            "value": false
+          },
+          "passes": [
+            {
+              "constantshadervalues": {
+                "alpha": {
+                  "user": "strength",
+                  "value": 0.4
+                },
+                "color": {
+                  "user": "tint",
+                  "value": "1 1 1"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "Caption",
+      "text": {
+        "user": "caption",
+        "value": "Properties"
+      },
+      "font": "systemfont_sansserif",
+      "pointsize": 10,
+      "origin": "256 50 0",
+      "color": {
+        "user": "tint",
+        "value": "1 1 1"
+      }
+    },
+    {
+      "id": 3,
+      "name": "Second cloud",
+      "image": "models/clouds.json",
+      "origin": "420 180 0",
+      "size": "100 80",
+      "alpha": {
+        "user": "opacity",
+        "value": 1
+      }
+    }
+  ]
+}

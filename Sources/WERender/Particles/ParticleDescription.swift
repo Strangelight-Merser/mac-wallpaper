@@ -181,6 +181,7 @@ struct ParticleRenderStyle {
 
 /// A particle object and its static or event children, with resolved user properties and material passes.
 public struct ParticleSystemDescription {
+    var userBindings: [UserBinding] = []
     public let id: Int
     public let name: String
     public let visible: Bool
@@ -240,12 +241,13 @@ public struct ParticleSystemDescription {
         childIndex += 1
         let definition: [String: Any]
         var ancestors = ancestors
-        if let path = object["particle"] as? String {
+        if let path = properties.resolve(object["particle"]) as? String {
             guard ancestors.insert(path).inserted else { throw WEFormatError.corrupt("cyclic particle child: \(path)") }
             definition = try locator.json(path)
         } else if let inline = object["particle"] as? [String: Any] {
             definition = inline
         } else { throw WEFormatError.corrupt("\(name): invalid particle definition") }
+        userBindings = UserBinding.discover(definition, object: id, path: "particle")
         let v = ParticleValues(definition, properties)
         let ov = ParticleValues(object["instanceoverride"] as? [String: Any] ?? [:], properties)
         overrides = ParticleOverrides(ov)
@@ -295,8 +297,10 @@ public struct ParticleSystemDescription {
         controlPoints = points
         let ropeOnly = !renderers.isEmpty && renderers.allSatisfy { $0.rope }
         if let path = definition["material"] as? String {
-            passes = (try locator.json(path)["passes"] as? [[String: Any]] ?? []).compactMap { d in
-                var p = SceneDescription.Pass(material: d, label: name)
+            let material = try locator.json(path)
+            userBindings += UserBinding.discover(material, object: id, path: "particle.material")
+            passes = (material["passes"] as? [[String: Any]] ?? []).compactMap { d in
+                var p = SceneDescription.Pass(material: d, label: name, properties: properties)
                 guard p.shader == "genericparticle" || p.shader == "genericropeparticle" else { unsupported("shader", p.shader); return nil }
                 if ropeOnly { p.shader = "genericropeparticle" }
                 return p
