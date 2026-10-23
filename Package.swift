@@ -6,6 +6,7 @@ let package = Package(
     platforms: [.macOS(.v14)],
     products: [
         .library(name: "WEFormat", targets: ["WEFormat"]),
+        .library(name: "WESteam", targets: ["WESteam"]),
         .executable(name: "wecli", targets: ["wecli"]),
         .executable(name: "WallpaperApp", targets: ["WallpaperApp"]),
     ],
@@ -78,11 +79,15 @@ let package = Package(
         ),
         .target(name: "WEShader", dependencies: ["WEFormat", "CShaderTools"]),
         .target(name: "WEVideo"),
+        .target(name: "CSteamSupport", linkerSettings: [.linkedLibrary("lzma"), .linkedLibrary("z")]),
+        .target(name: "WESteam", dependencies: ["CSteamSupport"],
+                swiftSettings: [.unsafeFlags(["-swift-version", "6"])]),
+        .testTarget(name: "WESteamTests", dependencies: ["WESteam", "CSteamSupport"]),
         // System audio capture (ScreenCaptureKit) and WE's audio spectrum analysis.
         .target(name: "WEAudio"),
         .target(name: "WEWeb", dependencies: ["WERender"]),
         .target(name: "WERender", dependencies: ["WEFormat", "WEShader", "WEVideo", "WEAudio"]),
-        .executableTarget(name: "wecli", dependencies: ["WEFormat", "WERender", "WEShader", "WEWeb", "WEAudio"]),
+        .executableTarget(name: "wecli", dependencies: ["WEFormat", "WERender", "WEShader", "WEWeb", "WEAudio", "WESteam"]),
         .executableTarget(name: "WallpaperApp", dependencies: ["WERender", "WEWeb", "WEAudio"]),
         // Compiles .metal files through MTLDevice.makeLibrary (used by scripts/shader_batch.py).
         .executableTarget(name: "metalcheck", path: "tools", sources: ["metalcheck.swift"]),

@@ -498,6 +498,26 @@ AVPlayerLayer   WKWebView + WE JS 桥     │
   - 下载的场景是 `scene.pkg`（PKGV0018）：用 `wecli pkg` 解包后能渲染出主体画面；缺两个粒子系统和一个文字图层——正好是兼容性检查要报告的内容。`.pkg` 直接作为资源根仍在路线图上。
 - **测试样本规则**：只用分级为 Everyone 的壁纸；只下载测试真正需要的；下载前先告诉用户大小，由用户决定（也可以由用户从 Windows 电脑拷贝）。清单见 `regression/workshop/samples.txt`（21 项，已去掉 1 个 Questionable）。确认 WE 的 `assets` 能否只取 `assets/` 目录仍待验证（需要下载，先问用户）。
 
+## 6.21 原生 Steam 模块 WESteam（2026-10-22）
+
+按 `docs/specs/steam-module.md` 的规格由 Codex 实现（约 1,640 行代码 + 760 行测试），我审查、修 bug 并实测。没有第三方依赖：系统 zlib、liblzma（SDK 里只有 `liblzma.tbd` 没有头文件，`CSteamSupport` 里自己声明了用到的几个函数和结构体）、CommonCrypto、Security。
+
+**内容**：扫码登录（二维码随 Steam 轮换自动更新）和账号密码 + Steam Guard 登录；令牌存钥匙串（服务名 `dev.macwallpaper.steam`）；访问令牌续期；网页 cookie；CM WebSocket 客户端（服务器目录、分包 `Multi`、作业编号与超时、心跳、刷新令牌登录、unified 服务调用、depot 密钥）；工坊详情、订阅列表（CM 优先，社区网页兜底）；工坊内容下载（manifest 请求码 → manifest → 解密文件名 → 分块并行下载、解密、解压、逐块与逐文件 SHA-1 校验、断点续传、暂存目录 + `renamex_np(RENAME_SWAP)` 原子替换、`.steam-manifest.json` 记录版本）；下载前报告大小并强制字节上限。`wecli steam login|whoami|logout|details|subs|download` 用于实测。
+
+**实测（2026-10-22）**：扫码登录成功并存入钥匙串；订阅列表**直接通过 CM 的 `PublishedFile.GetUserFiles` 拿到**（22 项，类型和分级正确，不需要网页兜底）；下载 2996321829（3.96 MB 网络流量）得到的 3 个文件与昨天验证脚本下载的逐字节一致；`--max-mb 1` 时只读取 manifest 就按大小拒绝。单元测试 29/29，渲染回归 131/131。
+
+**审查和实测中修掉的问题**
+- 钥匙串读取报 `-50`：macOS 文件型钥匙串不允许 `kSecReturnData` 和 `kSecMatchLimitAll` 一起用，改为先列属性、再按条目取数据（Codex 的沙盒里这个测试被跳过，所以没发现）。
+- `URLSessionWebSocketTask` 默认只收 1 MB 以内的消息，CM 的 `Multi` 包可能更大，会表现为随机断线；上限改为 64 MB。
+- 扫码后登录被 Steam 结束（EResult 9）：扫码那一刻轮询结果会带 `new_client_id`，照 steam-session 改用它之后，下一次轮询就"找不到"。改为一直用最初的 `client_id`（与验证脚本一致）后登录成功。
+- manifest 里加密文件名的 base64 带换行，Foundation 的严格解码会失败（Node 会跳过）；改为忽略未知字符，并像参考实现一样在第一个 NUL 处截断。测试数据已改成 Steam 的格式。
+
+**对界面的要求（记下来，做登录面板时要满足）**
+- 二维码约每 30 秒更换一次，旧码立即失效，手机上会显示"登录请求已失效"：面板必须实时显示最新的码，并在扫码后提示"请在手机上确认"。
+- 开发版是临时签名，每次重新构建后 macOS 可能弹窗询问是否允许读取钥匙串条目；正式签名的 App 不会反复询问。
+
+**尚未做**：zstd 分块（遇到时报"不支持"，接入官方单文件解码器约 0.4 MB，需要用户同意下载）；账号密码 + Steam Guard 登录只有离线测试，未实测；断线自动重连；WE `assets` 的下载（app 431960 本体 depot，需要先确认大小）。
+
 ## 7. 待确认
 1. 最低系统版本：建议 macOS 14（SMAppService、ScreenCaptureKit 音频成熟）。
 2. 工程形态：目前采用 SwiftPM + 生成 .app 的脚本（§6.11）；到需要正式签名分发时，再考虑加一个 Xcode 工程来包装。

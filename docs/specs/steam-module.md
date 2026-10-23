@@ -1,6 +1,6 @@
 # WESteam — native Steam module (implementation spec)
 
-Status: spec for implementation (2026-10-22). Background and decisions: `docs/design.md` §6.19–6.20.
+Status: implemented 2026-10-22 (see `docs/design.md` §6.21 for review fixes and live results). Background: §6.19–6.20.
 
 ## 1. Goal and scope
 
@@ -98,7 +98,8 @@ rejects form input, fall back to `input_protobuf_encoded=<base64 protobuf>` as s
    cookies). Response: `client_id` (string of a uint64), `challenge_url` (`https://s.team/q/1/<id>`),
    `request_id` (base64), `interval` (seconds), `allowed_confirmations`.
 2. Poll `PollAuthSessionStatus` (`client_id`, `request_id`) every `interval` seconds. Fields that may appear:
-   `new_challenge_url` (the QR must be redrawn), `new_client_id` (use it from then on),
+   `new_challenge_url` (the QR must be redrawn), `new_client_id` (**ignore it** — live tests showed that
+   switching to it after a scan ends the session with EResult 9; keep polling with the original `client_id`),
    `had_remote_interaction` (scanned, waiting for confirmation), and on success `refresh_token`,
    `access_token`, `account_name`.
 3. Expiry: stop after 10 minutes or on a terminal EResult; the caller may start a new session.
@@ -231,7 +232,7 @@ public struct WorkshopItem: Sendable, Codable, Equatable {
 
 ### 8.2 Subscriptions
 Primary: unified `PublishedFile.GetUserFiles#1` over the CM session (`steamid`, `appid=431960`,
-`type="mysubscriptions"`, `numperpage=100`, paging, `ids_only` or minimal returns) — **unverified**; if
+`type="mysubscriptions"`, `numperpage=100`, paging, `ids_only` or minimal returns) — **verified live**; if
 Steam rejects it, fall back to the web page, which is **verified**:
 `https://steamcommunity.com/profiles/<steamid>/myworkshopfiles/?appid=431960&browsefilter=mysubscriptions&p=<n>&numperpage=30`
 fetched with the §6 cookies; collect `sharedfiles/filedetails/?id=(\d+)`, stop when a page adds no new IDs;

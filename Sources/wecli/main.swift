@@ -9,10 +9,13 @@ import WEFormat
 import WERender
 import WEShader
 import WEAudio
+import WESteam
+import CoreImage
 
 func usage() -> Never {
     print("""
     usage:
+      wecli steam login|whoami|logout|details|subs|download
       wecli texinfo <file.tex>...
       wecli tex2png <file.tex> <out.png>
       wecli verify  <dir>            decode every .tex and compare with sibling .png
@@ -164,9 +167,26 @@ func renderWithWebKit(_ request: WebContentRequest, width: Int, height: Int, tim
 }
 
 let args = CommandLine.arguments
-guard args.count >= 3 else { usage() }
+guard args.count >= 3 else {
+    if args.count == 2 && args[1] == "steam" { steamUsage() }
+    usage()
+}
 
 switch args[1] {
+case "steam":
+    let semaphore = DispatchSemaphore(value: 0)
+    Task.detached {
+        do { try await steamCommand(Array(args.dropFirst(2))) }
+        catch {
+            if let error = error as? SteamError { print(error.description) }
+            else if error is CancellationError { print("Steam operation cancelled") }
+            else { print("Steam operation failed (local I/O or transport)") }
+            exit(1)
+        }
+        semaphore.signal()
+    }
+    semaphore.wait()
+
 case "texinfo":
     for p in args.dropFirst(2) {
         do { print("\(p): \(describe(try Tex(data: Data(contentsOf: URL(fileURLWithPath: p)))))") }
@@ -443,4 +463,192 @@ case "bench":
 
 default:
     usage()
+}
+
+
+func steamUsage() -> Never {
+    print("""
+    wecli steam login [--password <account>] [--qr-out qr.png]
+    wecli steam whoami
+    wecli steam logout [<account>]
+    wecli steam details <id>...
+    wecli steam subs [--json]
+    wecli steam download <id> --out <dir> [--max-mb N] [--yes]
+    """)
+    exit(2)
+}
+
+@Sendable func steamSecret(_ prompt: String) throws -> String {
+    guard let value = getpass(prompt) else { throw SteamError.malformed("terminal input unavailable") }
+    let result = String(cString: value)
+    memset(value, 0, strlen(value))
+    return result
+}
+
+func steamQR(_ url: URL, output: URL) throws {
+    guard let filter = CIFilter(name: "CIQRCodeGenerator") else { throw SteamError.malformed("QR generator unavailable") }
+    filter.setValue(Data(url.absoluteString.utf8), forKey: "inputMessage")
+    filter.setValue("M", forKey: "inputCorrectionLevel")
+    guard let ci = filter.outputImage, let qr = CIContext().createCGImage(ci, from: ci.extent) else {
+        throw SteamError.malformed("QR generation")
+    }
+    let side = qr.width + 8
+    guard let context = CGContext(data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: side * 4,
+                                  space: CGColorSpaceCreateDeviceRGB(),
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
+        throw SteamError.malformed("QR bitmap")
+    }
+    context.setFillColor(CGColor(gray: 1, alpha: 1)); context.fill(CGRect(x: 0, y: 0, width: side, height: side))
+    context.interpolationQuality = .none
+    context.draw(qr, in: CGRect(x: 4, y: 4, width: qr.width, height: qr.height))
+    guard let image = context.makeImage(), let raw = context.data else { throw SteamError.malformed("QR image") }
+    let bytes = raw.assumingMemoryBound(to: UInt8.self)
+    for y in 0..<side {
+        var line = "\u{001B}[30;47m"
+        for x in 0..<side { line += bytes[(y * side + x) * 4] < 128 ? "██" : "  " }
+        print(line + "\u{001B}[0m")
+    }
+    let scale = 8
+    guard let large = CGContext(data: nil, width: side * scale, height: side * scale, bitsPerComponent: 8,
+                                bytesPerRow: side * scale * 4, space: CGColorSpaceCreateDeviceRGB(),
+                                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
+        throw SteamError.malformed("QR output")
+    }
+    large.interpolationQuality = .none
+    large.draw(image, in: CGRect(x: 0, y: 0, width: side * scale, height: side * scale))
+    guard let png = large.makeImage() else { throw SteamError.malformed("QR output") }
+    try writePNG(png, to: output)
+    print("Scan with the Steam mobile app. QR: \(output.path)")
+}
+
+func steamCommand(_ arguments: [String]) async throws {
+    guard let command = arguments.first else { steamUsage() }
+    var positional: [String] = [], options: [String: String] = [:], flags = Set<String>()
+    var index = 1
+    let allowedOptions: Set<String>
+    let allowedFlags: Set<String>
+    switch command {
+    case "login": allowedOptions = ["--password", "--qr-out"]; allowedFlags = []
+    case "download": allowedOptions = ["--out", "--max-mb"]; allowedFlags = ["--yes"]
+    case "subs": allowedOptions = []; allowedFlags = ["--json"]
+    case "whoami", "logout", "details": allowedOptions = []; allowedFlags = []
+    default: steamUsage()
+    }
+    while index < arguments.count {
+        let arg = arguments[index]
+        if allowedFlags.contains(arg) { flags.insert(arg) }
+        else if allowedOptions.contains(arg) {
+            index += 1
+            guard index < arguments.count else { steamUsage() }
+            options[arg] = arguments[index]
+        } else if arg.hasPrefix("--") { steamUsage() }
+        else { positional.append(arg) }
+        index += 1
+    }
+    let machine = "mac-wallpaper on " + ProcessInfo.processInfo.hostName
+    func stored() throws -> SteamTokens {
+        guard let tokens = try SteamKeychain.load() else { throw SteamError.malformed("not logged in; run steam login") }
+        return tokens
+    }
+    func show(_ items: [WorkshopItem]) {
+        for item in items {
+            print("\(item.id)  \(item.kind?.rawValue ?? "?")  \(item.rating?.rawValue ?? "?")  \(item.fileSize) bytes  \(item.title)  \(item.timeUpdated.ISO8601Format())  result=\(item.result)")
+        }
+    }
+    switch command {
+    case "login":
+        guard positional.isEmpty else { steamUsage() }
+        let tokens: SteamTokens
+        if let account = options["--password"] {
+            let password = try steamSecret("Steam password: ")
+            tokens = try await SteamPasswordLogin(deviceName: machine).login(account: account, password: password) { choices in
+                for (index, choice) in choices.enumerated() { print("\(index + 1): \(choice.kind)") }
+                let selected: SteamGuardConfirmation
+                if choices.count == 1 { selected = choices[0] }
+                else {
+                    print("Choose a Steam Guard method:")
+                    guard let line = readLine(), let number = Int(line), (1...choices.count).contains(number) else {
+                        throw SteamError.malformed("Steam Guard selection")
+                    }
+                    selected = choices[number - 1]
+                }
+                if selected.kind == .emailCode || selected.kind == .deviceCode {
+                    return (selected.kind, try steamSecret("Steam Guard code: "))
+                }
+                print("Approve the login in Steam or email.")
+                return (selected.kind, nil)
+            }
+        } else {
+            var authenticated: SteamTokens?
+            for try await event in SteamQRLogin(deviceName: machine).events() {
+                switch event {
+                case .challenge(let url): try steamQR(url, output: URL(fileURLWithPath: options["--qr-out"] ?? "qr.png"))
+                case .scanned: print("Scanned; waiting for approval.")
+                case .succeeded(let result): authenticated = result
+                }
+            }
+            guard let authenticated else { throw SteamError.expired }
+            tokens = authenticated
+        }
+        try SteamKeychain.save(tokens)
+        print("Logged in: \(tokens.accountName) (\(tokens.steamID))")
+    case "whoami":
+        guard positional.isEmpty else { steamUsage() }
+        let tokens = try stored()
+        print("\(tokens.accountName)  \(tokens.steamID)")
+        print("Refresh token expires: \(try SteamJWT(tokens.refreshToken).exp.ISO8601Format())")
+        if let access = tokens.accessToken { print("Access token expires: \(try SteamJWT(access).exp.ISO8601Format())") }
+    case "logout":
+        guard positional.count <= 1 else { steamUsage() }
+        let account = try positional.first ?? stored().accountName
+        try SteamKeychain.delete(account: account)
+        print("Removed local Steam login: \(account)")
+    case "details":
+        let ids = positional.compactMap(UInt64.init)
+        guard !ids.isEmpty, ids.count == positional.count else { steamUsage() }
+        show(try await SteamWorkshop().details(ids))
+    case "subs", "download":
+        if command == "subs" {
+            guard positional.isEmpty else { steamUsage() }
+        } else {
+            guard positional.count == 1, UInt64(positional[0]) != nil, options["--out"] != nil else { steamUsage() }
+        }
+        let limitMB = Double(options["--max-mb"] ?? "10")
+        guard let limitMB, limitMB.isFinite, limitMB >= 0, limitMB < Double(Int64.max) / 1048576 else { steamUsage() }
+        var tokens = try stored()
+        if command == "subs" {
+            tokens = try await freshAccessToken(tokens)
+            try SteamKeychain.save(tokens)
+        }
+        let client = SteamCMClient(machineName: machine)
+        do {
+            try await client.connect()
+            let session = try await client.logOn(tokens)
+            if command == "subs" {
+                let subs = try await SteamWorkshop().subscriptions(client: client, tokens: tokens)
+                let items = try await SteamWorkshop().details(subs.ids)
+                if flags.contains("--json") {
+                    struct Output: Encodable { let source: SteamSubscriptions.Source; let items: [WorkshopItem] }
+                    let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]; encoder.dateEncodingStrategy = .iso8601
+                    print(String(decoding: try encoder.encode(Output(source: subs.source, items: items)), as: UTF8.self))
+                } else { print("Subscriptions via \(subs.source.rawValue)"); show(items) }
+            } else {
+                guard let item = try await SteamWorkshop().details([UInt64(positional[0])!]).first else {
+                    throw SteamError.malformed("workshop item missing")
+                }
+                let downloader = WorkshopDownloader(client: client, session: session)
+                let plan = try await downloader.plan(item)
+                print("Download: \(plan.networkBytes) bytes; files on disk: \(plan.diskBytes) bytes")
+                let limit = flags.contains("--yes") ? Int64.max : Int64(limitMB * 1048576)
+                try plan.checkLimit(limit)
+                let result = try await downloader.download(plan, to: URL(fileURLWithPath: options["--out"]!), maxBytes: limit) { progress in
+                    print("\(progress.networkBytesDone)/\(progress.networkBytesTotal) bytes; \(progress.filesDone)/\(progress.filesTotal) files")
+                }
+                for warning in result.warnings { print("Warning: \(warning)") }
+                print("Downloaded \(result.files) files to \(result.destination.path)")
+            }
+            await client.disconnect()
+        } catch { await client.disconnect(); throw error }
+    default: steamUsage()
+    }
 }
