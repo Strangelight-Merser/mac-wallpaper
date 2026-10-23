@@ -26,6 +26,8 @@ final class SteamModel {
 
     private(set) var account: SteamTokens?
     private(set) var accountLoaded = false
+    /// Set when a saved login exists but macOS refused to hand it over (Keychain access denied).
+    private(set) var accountProblem: String?
     var login: Login = .idle
     var loginSheetShown = false
     var importSheetShown = false
@@ -49,7 +51,14 @@ final class SteamModel {
     func loadAccount() {
         guard !accountLoaded else { return }
         accountLoaded = true
-        account = try? SteamKeychain.load()
+        do {
+            account = try SteamKeychain.load()
+        } catch {
+            // Development builds change their code signature on every build, so macOS asks again for
+            // Keychain access; a denied or dismissed prompt ends up here.
+            account = nil
+            accountProblem = String(localized: "macOS didn’t allow access to the saved Steam login. Log in again.")
+        }
         connection.account = account
     }
 
@@ -133,6 +142,7 @@ final class SteamModel {
         do { try SteamKeychain.save(tokens) } catch { login = .failed(Self.message(error)); return }
         account = tokens
         accountLoaded = true
+        accountProblem = nil
         connection.account = tokens
         login = .idle
         loginSheetShown = false
@@ -156,7 +166,11 @@ final class SteamModel {
     }
 
     func loadSubscriptions() async {
-        guard let account, subscriptionsState != .loading else { return }
+        guard let account else {
+            subscriptionsState = .failed(String(localized: "Log in to Steam to see your subscriptions."))
+            return
+        }
+        guard subscriptionsState != .loading else { return }
         subscriptionsState = .loading
         do {
             let ids = try await connection.run { client, _ in

@@ -91,6 +91,10 @@ private struct Sidebar: View {
                         Label { Text("Log In to Steam…") } icon: { Image(systemName: "person.crop.circle.badge.plus") }
                     }
                     .buttonStyle(.plain)
+                    if let problem = steam.accountProblem {
+                        Text(problem).font(.caption).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             } header: { Text("Steam") }
             Section {

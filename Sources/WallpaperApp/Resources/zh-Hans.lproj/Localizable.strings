@@ -142,3 +142,5 @@
 "Log In to Steam…" = "登录 Steam…";
 "Steam" = "Steam";
 "Retry" = "重试";
+"macOS didn’t allow access to the saved Steam login. Log in again." = "macOS 没有允许读取已保存的 Steam 登录，请重新登录。";
+"Log in to Steam to see your subscriptions." = "登录 Steam 后才能看到你的订阅。";

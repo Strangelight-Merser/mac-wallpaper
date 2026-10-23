@@ -22,7 +22,11 @@ struct ImportSheet: View {
             case .failed(let message):
                 VStack(spacing: 12) {
                     Text(message).foregroundStyle(.secondary)
-                    Button { Task { await steam.loadSubscriptions() } } label: { Text("Try Again") }
+                    if steam.account == nil {
+                        Button { steam.importSheetShown = false; steam.showLogin() } label: { Text("Log In to Steam…") }
+                    } else {
+                        Button { Task { await steam.loadSubscriptions() } } label: { Text("Try Again") }
+                    }
                 }
                 .frame(maxWidth: .infinity, minHeight: 320)
             case .loaded:
