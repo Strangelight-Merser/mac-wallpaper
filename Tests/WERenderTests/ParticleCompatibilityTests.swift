@@ -17,7 +17,7 @@ final class ParticleCompatibilityTests: ParticleTestCase {
     func testParticleOnlySceneSupportedAndVersionBumped() async throws {
         let result = try await check(["material": "material.json", "emitter": [["name": "sphererandom"]]])
         XCTAssertEqual(result.status, .supported); XCTAssertTrue(result.missing.isEmpty)
-        XCTAssertEqual(result.checkerVersion, 2); XCTAssertFalse(result.checkedDeep)
+        XCTAssertEqual(result.checkerVersion, CompatibilityChecker.version); XCTAssertFalse(result.checkedDeep)
     }
 
     func testOnlyUnsupportedParticleFeaturesReported() async throws {

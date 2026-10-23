@@ -76,6 +76,9 @@ public final class SceneRenderer: WallpaperRenderer {
 
     var programs: [String: Program] = [:]
     var textures: [String: LoadedTexture] = [:]
+    /// Text layers by layer index, and text set by scripts (overriding the static value).
+    var textStates: [Int: TextLayerState] = [:]
+    var textOverrides: [Int: String] = [:]
     var samplers: [Bool: MTLSamplerState] = [:]
     var time: Float = 0
     var outputSize = SIMD2<Float>(1, 1)
@@ -163,6 +166,7 @@ public final class SceneRenderer: WallpaperRenderer {
         fullFrameValid = false
         self.commandBuffer = commandBuffer
 
+        updateTextLayers()
         let c = scene.clearColor
         _ = encoder(for: sceneTarget, clear: MTLClearColor(red: Double(c.x), green: Double(c.y), blue: Double(c.z), alpha: 1))
         let projection = coverProjection(output: outputSize)
@@ -362,6 +366,7 @@ public final class SceneRenderer: WallpaperRenderer {
     lazy var layerSizes: [SIMD2<Float>] = scene.layers.indices.map { i in
         let layer = scene.layers[i]
         if layer.size.x > 0, layer.size.y > 0 { return layer.size }
+        if layer.text != nil { return layer.size } // sized by `updateTextLayers`
         if let name = layer.passes.first?.textures.first ?? nil, let t = try? resolveTexture(name) { return t.imageSize }
         warn("\(layer.name): no size")
         return layer.size
@@ -378,6 +383,7 @@ public final class SceneRenderer: WallpaperRenderer {
         let toScene = layer.visible
         let fbo = (passes.count > 1 || !toScene) ? compositeTargets(index, w, h) : []
         var model = layer.parentTransform * translation(layer.origin) * rotationZ(layer.angles.z) * scaling(layer.scale)
+            * translation(textOffset(index))
         if scene.parallax.enabled {
             let d = (layer.parallaxDepth + scene.parallax.amount) * pointer.parallax * scene.canvas.x
             model = translation(SIMD3(d.x, d.y, 0)) * model
@@ -835,6 +841,8 @@ public final class SceneRenderer: WallpaperRenderer {
         case "g_ParallaxPosition": return [0.5, 0.5]
         case "g_LightAmbientColor", "g_LightSkylightColor": return [0.3, 0.3, 0.3]
         case "g_RenderVar0": return [1, 0, 0, 0]
+        // The font shader's MSDF outline / shadow parameters (unused by plain rasterized text).
+        case "g_RenderVar1", "g_RenderVar2", "g_RenderVar3": return [0, 0, 0, 0]
         default: break
         }
         if name.hasPrefix("g_Texture"), name.hasSuffix("Resolution"), let i = Int(name.dropFirst(9).dropLast(10)) {

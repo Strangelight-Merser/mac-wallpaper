@@ -28,7 +28,7 @@ public struct Compatibility: Codable, Sendable, Equatable {
 
 /// Checks local assets and unsupported features without needing a GPU for static checks.
 public struct CompatibilityChecker: Sendable {
-    public static let version = 2
+    public static let version = 3
     private let assets: URL?
 
     public init(assets: URL?) { self.assets = assets }
@@ -97,11 +97,12 @@ public struct CompatibilityChecker: Sendable {
         if containsScript(raw["general"]) || containsScript(project["general"]) { add(.sceneScript) }
         for case let object as [String: Any] in raw["objects"] as? [Any] ?? [] {
             if containsScript(object) { add(.sceneScript) }
-            if object["particle"] != nil { continue }
+            if object["particle"] != nil || object["text"] != nil { continue }
             guard let image = object["image"] as? String else {
-                let kinds: [(String, Feature)] = [("text", .text), ("model", .model3D), ("sound", .sound), ("light", .light)]
+                let kinds: [(String, Feature)] = [("model", .model3D), ("sound", .sound), ("light", .light)]
                 if let kind = kinds.first(where: { object[$0.0] != nil }) { add(kind.1) }
-                else if !object.isEmpty { add(.unknownObject) }
+                // Objects with only a transform group their children.
+                else if !object.isEmpty, object["origin"] == nil, object["parent"] == nil { add(.unknownObject) }
                 continue
             }
             if let model = try? locator.json(image), model["puppet"] != nil { add(.puppetWarp) }
@@ -136,7 +137,8 @@ public struct CompatibilityChecker: Sendable {
                 }
                 for (slot, texture) in pass.textures.enumerated() {
                     guard let name = texture, pass.binds[slot] == nil else { continue }
-                    if name.hasPrefix("_rt_") || ["util/white", "util/black"].contains(name) { continue }
+                    // `$text:` textures are rendered from the text object, not loaded.
+                    if name.hasPrefix("_rt_") || name.hasPrefix("$text:") || ["util/white", "util/black"].contains(name) { continue }
                     do {
                         if try Tex.isVideo(data: locator.data("materials/\(name).tex")) {
                             features.insert(.videoTexture)
@@ -198,8 +200,7 @@ private actor DeepCheck {
                         for layer in scene.scene.layers where warning.hasPrefix(layer.name + ": ") { failedLayers.insert(layer.name) }
                     }
                 }
-                let mappings: [(String, Feature)] = [("text object", .text),
-                    ("model object", .model3D), ("sound object", .sound), ("light object", .light),
+                let mappings: [(String, Feature)] = [("model object", .model3D), ("sound object", .sound), ("light object", .light),
                     ("other object", .unknownObject), ("video textures", .videoTexture), ("asset not found", .missingAsset)]
                 if lower.contains(": particle "), lower.hasSuffix("not supported") { warningFeatures[.particles, default: 0] += 1 }
                 for (text, feature) in mappings where lower.contains(text) { warningFeatures[feature, default: 0] += 1 }

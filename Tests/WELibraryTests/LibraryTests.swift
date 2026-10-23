@@ -52,11 +52,14 @@ final class LibraryTests: LibraryTestCase {
         let partialFolder = try scene("partial", objects: [
             ["name": "image", "image": "models/test.json", "effects": [["file": "effects/missing.json"]], "alpha": ["script": "x", "nested": ["scriptproperties": [:]]]],
             ["particle": "p"], ["text": "hello"], ["model": "3d"], ["sound": "s"], ["light": [:]], ["strange": true]])
+        // Text renders with WE's font shader.
+        for ext in ["vert", "frag"] { try write("partial/shaders/font.\(ext)", "") }
         let partial = await checker.check(WallpaperEntry(folder: partialFolder, root: .userFolder), deep: false)
         XCTAssertEqual(partial.status, .partial)
-        for feature: Feature in [.missingAsset, .text, .model3D, .sound, .light, .sceneScript, .missingEffect, .unknownObject] {
+        for feature: Feature in [.missingAsset, .model3D, .sound, .light, .sceneScript, .missingEffect, .unknownObject] {
             XCTAssertEqual(partial.missing[feature], 1, feature.rawValue)
         }
+        XCTAssertNil(partial.missing[.text]) // text objects render
         let app = try project("app", type: "application")
         let application = await checker.check(WallpaperEntry(folder: app, root: .downloads), deep: false)
         XCTAssertEqual(application.status, .unsupported); XCTAssertEqual(application.missing, [.applicationWallpaper: 1])

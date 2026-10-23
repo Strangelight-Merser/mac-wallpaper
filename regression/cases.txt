@@ -160,3 +160,9 @@ fixture/audiotest.right             regression/fixtures/audiotest               
 # mouse-following system (size and rate overrides) chasing --pointer.
 fixture/particletest.t1             regression/fixtures/particletest                     --time 1 --size 768x256 --pointer 0.8,0.4
 fixture/particletest.t3             regression/fixtures/particletest                     --time 3 --size 768x256 --pointer 0.8,0.4
+#
+# Text. texttest is our own fixture (regression/fixtures/texttest) using WE's stock fonts and the system
+# font: alignment around a shared origin, a parented child, wrapping with a row limit and ellipsis, CJK
+# fallback, an effect on a text layer, and a hidden text object.
+fixture/texttest                    regression/fixtures/texttest                         --size 1024x512
+fixture/texttest.small              regression/fixtures/texttest                         --size 512x256

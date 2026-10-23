@@ -174,7 +174,12 @@ public struct SceneDescription {
         public let parallaxDepth: SIMD2<Float>
         /// World transform of the object's scene parent (`"parent"`), identity for top-level objects.
         public let parentTransform: simd_float4x4
+        /// Text objects: the layer's base texture is the rendered text (`textTextureName`).
+        public let text: TextObject?
     }
+
+    /// Base texture name of a text layer, provided by the renderer.
+    static func textTextureName(id: Int) -> String { "$text:\(id)" }
 
     /// Camera parallax: layers follow the cursor (`general.cameraparallax*`).
     public struct Parallax {
@@ -228,7 +233,15 @@ public struct SceneDescription {
         var particles: [ParticleSystemDescription] = []
         var drawOrder: [SceneObject] = []
         var notes: [String] = []
-        let objects = (scene["objects"] as? [Any] ?? []).compactMap { $0 as? [String: Any] }
+        // WE leaves out values equal to their default. A missing origin is the canvas centre for top-level
+        // objects (e.g. a full-canvas image) and the parent's origin for children.
+        let center = "\(canvas.x / 2) \(canvas.y / 2) 0"
+        let objects = (scene["objects"] as? [Any] ?? []).compactMap { $0 as? [String: Any] }.map { o in
+            guard o["origin"] == nil, o["parent"] == nil else { return o }
+            var o = o
+            o["origin"] = center
+            return o
+        }
         let hierarchy = ObjectHierarchy(objects, properties: props)
         for obj in objects {
             let name = obj["name"] as? String ?? "?"
@@ -249,14 +262,28 @@ public struct SceneDescription {
                 } catch { notes.append("\(name): particle asset: \(error)") }
                 continue
             }
-            guard let image = obj["image"] as? String else {
-                let kind = ["sound", "text", "model", "light"].first { obj[$0] != nil } ?? "other"
-                notes.append("\(name): \(kind) object not supported"); continue
+            var model: [String: Any] = [:]
+            var passes: [Pass]
+            var text: TextObject?
+            if let image = obj["image"] as? String {
+                model = try locator.json(image)
+                guard let matPath = model["material"] as? String else { notes.append("\(name): no material"); continue }
+                let material = try locator.json(matPath)
+                passes = (material["passes"] as? [[String: Any]] ?? []).map { Pass(material: $0, label: "base") }
+            } else if obj["text"] != nil {
+                // WE draws glyph coverage with the `font` shader (g_Color4 = colour, alpha) into the text box.
+                let t = TextObject(object: obj, properties: props)
+                let mp = ((try? locator.json("materials/fonts/basefont.json"))?["passes"] as? [[String: Any]])?.first
+                var pass = Pass(material: mp ?? ["shader": "font", "blending": "translucent"], label: "text")
+                pass.textures = [Self.textTextureName(id: (obj["id"] as? NSNumber)?.intValue ?? -1)]
+                passes = [pass]
+                text = t
+                if props.bool(obj["opaquebackground"], default: false) { notes.append("\(name): text background not supported") }
+            } else {
+                let kind = ["sound", "model", "light"].first { obj[$0] != nil } ?? "other"
+                if kind != "other" || obj["origin"] == nil { notes.append("\(name): \(kind) object not supported") }
+                continue
             }
-            let model = try locator.json(image)
-            guard let matPath = model["material"] as? String else { notes.append("\(name): no material"); continue }
-            let material = try locator.json(matPath)
-            var passes = (material["passes"] as? [[String: Any]] ?? []).map { Pass(material: $0, label: "base") }
 
             var effectNames: [String] = []
             var effectFBOs: [[EffectFBO]] = []
@@ -342,7 +369,7 @@ public struct SceneDescription {
                 visible: visible,
                 passes: passes, effectNames: effectNames, effectFBOs: effectFBOs,
                 parallaxDepth: SIMD2(depth[0], depth[safe: 1] ?? depth[0]),
-                parentTransform: fullscreen ? matrix_identity_float4x4 : parent.transform))
+                parentTransform: fullscreen ? matrix_identity_float4x4 : parent.transform, text: text))
         }
         self.layers = layers
         self.particles = particles

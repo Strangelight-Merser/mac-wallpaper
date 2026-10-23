@@ -1,0 +1,53 @@
+{
+	"general" : {
+		"clearcolor" : "0.08 0.09 0.12",
+		"orthogonalprojection" : { "width" : 1024, "height" : 512 }
+	},
+	"objects" : [
+		{
+			"id" : 1, "name" : "clock", "text" : { "value" : "12:34" }, "font" : "fonts/RobotoMono-Regular.ttf",
+			"pointsize" : 24, "padding" : 16, "horizontalalign" : "center", "verticalalign" : "center",
+			"origin" : "512 420 0", "scale" : "0.5 0.5 1", "color" : "1 0.8 0.3", "visible" : true
+		},
+		{
+			"id" : 2, "name" : "date (child of clock)", "parent" : 1, "text" : { "value" : "Thursday, 23 October" },
+			"font" : "fonts/NotoSans-Regular.ttf", "pointsize" : 12, "padding" : 8,
+			"origin" : "0 -110 0", "scale" : "0.8 0.8 1", "color" : "0.8 0.85 1", "alpha" : 0.8, "visible" : true
+		},
+		{
+			"id" : 3, "name" : "align left", "text" : { "value" : "left" }, "font" : "fonts/NotoSans-Regular.ttf",
+			"pointsize" : 10, "padding" : 0, "horizontalalign" : "left", "verticalalign" : "top",
+			"origin" : "512 260 0", "scale" : "0.6 0.6 1", "color" : "0.4 1 0.5", "visible" : true
+		},
+		{
+			"id" : 4, "name" : "align right", "text" : { "value" : "right" }, "font" : "fonts/NotoSans-Regular.ttf",
+			"pointsize" : 10, "padding" : 0, "horizontalalign" : "right", "verticalalign" : "bottom",
+			"origin" : "512 260 0", "scale" : "0.6 0.6 1", "color" : "1 0.4 0.5", "visible" : true
+		},
+		{
+			"id" : 5, "name" : "wrapped", "font" : "fonts/NotoSans-Regular.ttf",
+			"text" : { "value" : "Wrapped text: a long line that has to break into rows, limited to two rows with an ellipsis at the end of the second one" },
+			"pointsize" : 8, "padding" : 4, "limitwidth" : true, "maxwidth" : 900, "limitrows" : true, "maxrows" : 2,
+			"limituseellipsis" : true, "horizontalalign" : "left", "verticalalign" : "center",
+			"origin" : "40 120 0", "scale" : "0.5 0.5 1", "color" : "1 1 1", "visible" : true
+		},
+		{
+			"id" : 6, "name" : "system font", "text" : { "value" : "你好，世界\nsystem font" }, "font" : "systemfont_sansserif",
+			"pointsize" : 10, "padding" : 8, "horizontalalign" : "center",
+			"origin" : "800 120 0", "scale" : "0.5 0.5 1", "color" : "0.6 0.8 1", "visible" : true
+		},
+		{
+			"id" : 7, "name" : "outlined", "text" : { "value" : "EDGE" }, "font" : "fonts/Lazer84.ttf",
+			"pointsize" : 14, "padding" : 32, "origin" : "180 300 0", "scale" : "0.5 0.5 1", "color" : "0 0 0", "visible" : true,
+			"effects" : [ {
+				"file" : "effects/edgedetection/effect.json", "visible" : true,
+				"passes" : [ { "constantshadervalues" : { "alpha" : 1, "brightness" : 2, "detectmultiply" : 5, "detectthreshold" : 0,
+					"outlinecolor" : "1 0.5 0.9", "outlinecolorbg" : "0 0 0", "size" : 2 } } ]
+			} ]
+		},
+		{
+			"id" : 8, "name" : "hidden", "text" : { "value" : "must not show" }, "font" : "fonts/NotoSans-Regular.ttf",
+			"pointsize" : 10, "origin" : "512 60 0", "visible" : false
+		}
+	]
+}
