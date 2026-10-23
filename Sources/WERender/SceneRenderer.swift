@@ -456,7 +456,8 @@ public final class SceneRenderer: WallpaperRenderer {
 
     func renderLayer(_ index: Int, projection: simd_float4x4) throws {
         let layer = scene.layers[index]
-        // Passes of effects hidden by scripts are skipped; plan keys keep the pass's original index.
+        // Passes of effects hidden by scripts are skipped; plan keys keep the pass's original index and
+        // include the blending, which moves to whichever pass is last (plans bake it in).
         let hidden = hiddenEffects[index] ?? layer.hiddenEffects
         var kept = Array(layerPasses[index].enumerated())
         if !hidden.isEmpty {
@@ -488,7 +489,7 @@ public final class SceneRenderer: WallpaperRenderer {
         defer { effectProjection = matrix_identity_float4x4 }
         let refresh = uniformsDirty.remove(index) != nil
         let plans = try passes.enumerated().map { i, pass -> PassPlan? in
-            pass.copy != nil ? nil : try self.plan("L\(index).\(kept[i].offset)", pass: pass, layer: layer, model: model,
+            pass.copy != nil ? nil : try self.plan("L\(index).\(kept[i].offset)|\(pass.blending)", pass: pass, layer: layer, model: model,
                                                    hasPrevious: i > 0, refreshUniforms: refresh)
         }
         // Effect FBOs visible to a pass (layer composites are looked up globally).
