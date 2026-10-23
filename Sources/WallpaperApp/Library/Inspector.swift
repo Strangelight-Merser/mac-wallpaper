@@ -303,13 +303,12 @@ private struct PropertyRow: View {
                     Spacer()
                     Text(number.formatted(.number.precision(.fractionLength(digits)))).foregroundStyle(.secondary).monospacedDigit()
                 }
-                Group {
-                    if let step, step > 0, step < max - min {
-                        Slider(value: Binding(get: { number }, set: { set(Self.format($0, digits)) }), in: min...Swift.max(min + step, max), step: step)
-                    } else {
-                        Slider(value: Binding(get: { number }, set: { set(Self.format($0, digits)) }), in: min...Swift.max(min + 0.0001, max))
-                    }
-                }
+                // No `step:` argument: AppKit then draws one tick mark per step, and a fine step over a wide
+                // range (0…1000 by 0.01) hangs the window. Values snap to the step instead.
+                Slider(value: Binding(get: { number }, set: { v in
+                    let snapped = step.map { $0 > 0 ? min + ((v - min) / $0).rounded() * $0 : v } ?? v
+                    set(Self.format(Swift.min(max, Swift.max(min, snapped)), digits))
+                }), in: min...Swift.max(min + 0.0001, max))
                 .controlSize(.small)
             }
         case .color:
