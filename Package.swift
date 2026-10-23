@@ -84,7 +84,16 @@ let package = Package(
         .testTarget(name: "WEShaderTests", dependencies: ["WEShader", "WEFormat"]),
         .target(name: "WEVideo"),
         .target(name: "CSteamSupport", linkerSettings: [.linkedLibrary("lzma"), .linkedLibrary("z")]),
-        .target(name: "WESteam", dependencies: ["CSteamSupport", "WEFormat"],
+        // Decoder-only zstd v1.5.7 (vendored in ThirdParty/zstd, reached through a symlink) for VSZa chunks.
+        .target(
+            name: "CZstd",
+            sources: ["shim.c", "zstd/lib/common", "zstd/lib/decompress"],
+            cSettings: [
+                .define("ZSTD_DISABLE_ASM"), .define("XXH_NAMESPACE", to: "ZSTD_"),
+                .unsafeFlags(["-w"]), // third-party sources: silence their warnings
+            ]
+        ),
+        .target(name: "WESteam", dependencies: ["CSteamSupport", "CZstd", "WEFormat"],
                 swiftSettings: [.unsafeFlags(["-swift-version", "6"])]),
         .testTarget(name: "WESteamTests", dependencies: ["WESteam", "CSteamSupport"]),
         // System audio capture (ScreenCaptureKit) and WE's audio spectrum analysis.

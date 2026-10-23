@@ -1,4 +1,5 @@
 import CSteamSupport
+import CZstd
 import CryptoKit
 import Foundation
 
@@ -41,7 +42,15 @@ public enum ChunkCodec {
     }
     public static func decompress(_ data: Data, maxOutput: Int = 64 * 1024 * 1024) throws -> Data {
         // steam-user/components/cdn_compression.js: headers, properties offset and footers.
-        if data.starts(with: Data("VSZa".utf8)) { throw SteamError.unsupportedCompression("zstd") }
+        if data.starts(with: Data("VSZa".utf8)) {
+            // Header, CRC, zstd frame, then CRC, size, 4 bytes of padding and "zsv".
+            guard data.count >= 23, data.suffix(3) == Data("zsv".utf8) else { throw SteamError.malformed("VSZa footer") }
+            let crc = try data.uint32(at: data.count - 15), size = Int(try data.uint32(at: data.count - 11))
+            guard size <= maxOutput else { throw SteamError.malformed("VSZa size limit") }
+            let result = try zstd(data.subdata(in: data.startIndex + 8..<data.endIndex - 15), size: size)
+            guard crc32(result) == crc else { throw SteamError.malformed("VSZa CRC") }
+            return result
+        }
         if data.starts(with: Data("VZa".utf8)) {
             guard data.count >= 22, data.suffix(2) == Data("zv".utf8) else { throw SteamError.malformed("VZip footer") }
             let crc = try data.uint32(at: data.count - 10), size = Int(try data.uint32(at: data.count - 6))
@@ -61,6 +70,15 @@ public enum ChunkCodec {
         let result = try decompress(decrypt(data, key: key), maxOutput: originalSize)
         guard result.count == originalSize, sha1(result) == sha else { throw SteamError.malformed("chunk SHA-1 or size") }
         return result
+    }
+    static func zstd(_ data: Data, size: Int) throws -> Data {
+        var out = Data(count: max(size, 1))
+        let written = data.withUnsafeBytes { input in
+            out.withUnsafeMutableBytes { czstd_decompress($0.baseAddress, size, input.baseAddress, data.count) }
+        }
+        guard written == size else { throw SteamError.malformed("zstd data or size") }
+        out.count = size
+        return out
     }
     static func lzma(_ data: Data, size: Int) throws -> Data {
         var stream = lzma_stream()

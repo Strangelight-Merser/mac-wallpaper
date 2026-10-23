@@ -516,7 +516,7 @@ AVPlayerLayer   WKWebView + WE JS 桥     │
 - 二维码约每 30 秒更换一次，旧码立即失效，手机上会显示"登录请求已失效"：面板必须实时显示最新的码，并在扫码后提示"请在手机上确认"。
 - 开发版是临时签名，每次重新构建后 macOS 可能弹窗询问是否允许读取钥匙串条目；正式签名的 App 不会反复询问。
 
-**尚未做**：zstd 分块（遇到时报"不支持"，接入官方单文件解码器约 0.4 MB，需要用户同意下载）；账号密码 + Steam Guard 登录只有离线测试，未实测；断线自动重连；WE `assets` 的下载（app 431960 本体 depot，需要先确认大小）。
+**尚未做**：~~zstd 分块~~（已支持，见 §6.25）；账号密码 + Steam Guard 登录只有离线测试，未实测；断线自动重连；WE `assets` 的下载（app 431960 本体 depot，需要先确认大小）。
 
 ## 6.22 壁纸库后端：直接读 .pkg、本地索引、兼容性检查（2026-10-22）
 
@@ -565,7 +565,12 @@ SwiftUI（macOS 14），原生 macOS 风格，作为风格讨论的基础；代�
 
 **shader 兼容**（`Sources/WEShader/ShaderCompat.swift`）：只在第一次编译失败后才改写源码重试，原来能编译的 shader 保持逐字节不变。改写项：CRLF 和 COMBO 写法、bool 参与算术、非常量初始化的全局 const、float 的 `%`（按 fmod 语义）、`mix` 的标量广播。WE assets 加演示壁纸里的 shader 906 个能编译 897 个；Zero Two 等壁纸现在能正常渲染。
 
-**WE assets 下载**（`Sources/WESteam/WEAssets.swift`，`wecli steam assets`）：没有 Windows 电脑的用户拿不到 WE 的 `assets` 文件夹，所以从用户自己的 Steam 账号下载 app 431960 的 Windows depot，只取其中的 `assets/`。先通过 PICS 读 app 信息、选 depot、取 manifest，下载内容前就给出文件数、下载大小和磁盘大小（`--plan`）；下载沿用工坊下载的机制（并行、断点续传、SHA-1 校验、原子替换、字节上限），完成后在旁边写一份收据，之后只比较 manifest 编号就能判断有没有更新，有更新只下改动的文件。离线测试全部通过；**还没有实测**：`--plan` 只取元数据（约 1–3 MB），需要 wecli 能读到 Steam 登录（扫码或钥匙串授权），由用户决定何时做；如果 depot 用 zstd 压缩，会明确报"不支持"。
+**WE assets 下载**（`Sources/WESteam/WEAssets.swift`，`wecli steam assets`）：没有 Windows 电脑的用户拿不到 WE 的 `assets` 文件夹，所以从用户自己的 Steam 账号下载 app 431960 的 Windows depot，只取其中的 `assets/`。先通过 PICS 读 app 信息、选 depot、取 manifest，下载内容前就给出文件数、下载大小和磁盘大小（`--plan`）；下载沿用工坊下载的机制（并行、断点续传、SHA-1 校验、原子替换、字节上限），完成后在旁边写一份收据，之后只比较 manifest 编号就能判断有没有更新，有更新只下改动的文件。实测（2026-10-23）：
+- `--plan` 约 22 秒：两个 depot（431961、431966），2,935 个文件，下载 38.2 MB，解压后 79.5 MB；文件数与已有的 assets 完全一致。
+- 真正下载时，下了 46 个文件就遇到 zstd 分块（`VSZa`）。macOS 自带的 Compression 框架没有 zstd，于是经用户同意，把官方 zstd v1.5.7 只含解压的部分（31 个文件，926 KB，压缩传输 227 KB，BSD 许可）原样放进 `ThirdParty/zstd`，由新的 `CZstd` 目标编译（`ZSTD_DISABLE_ASM`）。`VSZa` 的封装按 steam-user 处理：头部 4 字节 + CRC + zstd 帧 + CRC、原始大小、4 字节填充、`zsv`；解压后再核对 CRC 和大小。
+- 之后断点续传完成全部 2,935 个文件（用户网速约 30 KB/s，用了 40 分钟），与用户从 Windows 拷来的 assets 用 `diff -r` 比较**完全相同**；用下载的 assets 渲染的回归用例与参考图逐像素一致。
+- 下载位置就是 App 将来用的 `~/Library/Application Support/MacWallpaper/WEAssets/assets`，收据在旁边的 `assets.steam-assets.json`。更新检查只有离线测试（实测要再取一次 manifest，等 WE 真有更新时再做）。
+- wecli 扫码登录第一次在扫码后报 EResult 27（过期），重来一次、扫完立即确认就成功了。
 
 **下一步候选**：文字（时钟）、SceneScript、声音对象——都要改 `Scene.swift` 和 `SceneRenderer.swift`，所以放在粒子合并之后；App 里的 WE assets 下载和首次引导。
 

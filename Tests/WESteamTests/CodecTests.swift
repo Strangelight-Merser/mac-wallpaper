@@ -93,9 +93,30 @@ final class CodecTests: XCTestCase {
                 XCTAssertThrowsError(try ChunkCodec.decompress(bad))
             }
         }
-        XCTAssertThrowsError(try ChunkCodec.decompress(Data("VSZa".utf8))) {
-            XCTAssertEqual($0 as? SteamError, .unsupportedCompression("zstd"))
+        XCTAssertThrowsError(try ChunkCodec.decompress(Data("XXXX".utf8))) {
+            XCTAssertEqual($0 as? SteamError, .unsupportedCompression("unknown"))
         }
+    }
+    func testZstdChunk() throws {
+        // `printf 'Wallpaper Engine chunk %.0s' {1..200} | zstd -19` (zstd 1.5.7 CLI, with content checksum).
+        let hex = "28b52ffd0468fd0000b857616c6c706170657220456e67696e65206368756e6b200100bd43fbd90462c79f5f"
+        let frame = Data(stride(from: 0, to: hex.count, by: 2).map {
+            UInt8(hex[hex.index(hex.startIndex, offsetBy: $0)...].prefix(2), radix: 16)!
+        })
+        let plain = Data(String(repeating: "Wallpaper Engine chunk ", count: 200).utf8)
+        func vsza(_ frame: Data, crc: UInt32, size: Int) -> Data {
+            var d = Data("VSZa".utf8); d.appendLE(UInt32(0)); d.append(frame)
+            d.appendLE(crc); d.appendLE(UInt32(size)); d.appendLE(UInt32(0)); d.append(Data("zsv".utf8))
+            return d
+        }
+        let crc = ChunkCodec.crc32(plain)
+        XCTAssertEqual(try ChunkCodec.decompress(vsza(frame, crc: crc, size: plain.count)), plain)
+        XCTAssertThrowsError(try ChunkCodec.decompress(vsza(frame, crc: crc ^ 1, size: plain.count)))
+        XCTAssertThrowsError(try ChunkCodec.decompress(vsza(frame, crc: crc, size: plain.count - 1)))
+        XCTAssertThrowsError(try ChunkCodec.decompress(vsza(frame, crc: crc, size: plain.count), maxOutput: plain.count - 1))
+        XCTAssertThrowsError(try ChunkCodec.decompress(vsza(frame, crc: crc, size: plain.count).dropLast()))
+        var corrupt = frame; corrupt[corrupt.count - 6] ^= 0xff
+        XCTAssertThrowsError(try ChunkCodec.decompress(vsza(corrupt, crc: crc, size: plain.count)))
     }
     func testManifestEncryptedPathsAndPlanner() throws {
         let plain = Data("wallpaper".utf8)

@@ -184,7 +184,7 @@ final class AssetsTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: dest.path + ".partial"))
         let count = await queue.requests.count
         XCTAssertEqual(count, 0)
-        let encoded = try encrypt(Data("VSZa".utf8))
+        let encoded = try encrypt(Data("XXXX".utf8))
         let file = plan.content[0].manifest.files[0], chunk = file.chunks[0]
         let unsupported = ContentManifest.File(path: file.path, size: file.size, flags: 0, shaFilename: file.shaFilename,
             shaContent: file.shaContent, chunks: [.init(sha: chunk.sha, crc: chunk.crc, offset: 0,
@@ -195,7 +195,7 @@ final class AssetsTests: XCTestCase {
         try FileManager.default.createDirectory(at: dest, withIntermediateDirectories: true)
         try Data("old".utf8).write(to: dest.appendingPathComponent("old"))
         do { _ = try await downloader(server.http).download(bad, to: dest, maxBytes: .max) { _ in }; XCTFail() }
-        catch { XCTAssertEqual(error as? SteamError, .unsupportedCompression("zstd")) }
+        catch { XCTAssertEqual(error as? SteamError, .unsupportedCompression("unknown")) }
         XCTAssertEqual(try Data(contentsOf: dest.appendingPathComponent("old")), Data("old".utf8))
         XCTAssertFalse(FileManager.default.fileExists(atPath: WEAssetsDownloader.receiptURL(for: dest).path))
         let attempts = await server.hosts.count
