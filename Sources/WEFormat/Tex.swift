@@ -52,6 +52,30 @@ public struct Tex {
     public let frames: [Frame]
     public let gifSize: (width: Int, height: Int)?
 
+    /// Inspect the video flag/container without copying or decompressing texture payloads.
+    public static func isVideo(data: Data) throws -> Bool {
+        var reader = BinaryReader(Array(data.prefix(128)))
+        let magic = try reader.cString(maxLength: 16)
+        guard magic == "TEXV0005" else { throw WEFormatError.badMagic(magic, expected: "TEXV0005") }
+        let imageMagic = try reader.cString(maxLength: 16)
+        guard imageMagic == "TEXI0001" else { throw WEFormatError.badMagic(imageMagic, expected: "TEXI0001") }
+        _ = try reader.i32()
+        let flags = Flags(rawValue: try reader.u32())
+        if flags.contains(.isVideo) { return true }
+        for _ in 0..<5 { _ = try reader.i32() }
+        if flags.contains(.isVolume) { _ = try reader.i32() }
+        let container = try reader.cString(maxLength: 16)
+        _ = try reader.i32()
+        switch container {
+        case "TEXB0001", "TEXB0002": return false
+        case "TEXB0003": return try reader.i32() == 35
+        case "TEXB0004":
+            let format = try reader.i32(), mp4 = try reader.i32() == 1
+            return format == 35 || (format == -1 && mp4)
+        default: throw WEFormatError.badMagic(container, expected: "TEXB000[1-4]")
+        }
+    }
+
     public init(data: Data) throws { try self.init(bytes: [UInt8](data)) }
 
     public init(bytes: [UInt8]) throws {

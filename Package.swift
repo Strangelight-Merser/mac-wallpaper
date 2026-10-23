@@ -6,12 +6,15 @@ let package = Package(
     platforms: [.macOS(.v14)],
     products: [
         .library(name: "WEFormat", targets: ["WEFormat"]),
+        .library(name: "WELibrary", targets: ["WELibrary"]),
         .library(name: "WESteam", targets: ["WESteam"]),
         .executable(name: "wecli", targets: ["wecli"]),
         .executable(name: "WallpaperApp", targets: ["WallpaperApp"]),
     ],
     targets: [
         .target(name: "WEFormat"),
+        .target(name: "WELibrary", dependencies: ["WEFormat", "WERender", "WEVideo"]),
+        .testTarget(name: "WELibraryTests", dependencies: ["WELibrary", "WEFormat", "WEShader", "WERender"]),
         // glslang 16.6.0 + SPIRV-Cross vulkan-sdk-1.4.363.0 (git submodules in ThirdParty/, reached through
         // symlinks) compiled in-process, behind a small C API (include/shader_tools.h).
         .target(
@@ -87,7 +90,7 @@ let package = Package(
         .target(name: "WEAudio"),
         .target(name: "WEWeb", dependencies: ["WERender"]),
         .target(name: "WERender", dependencies: ["WEFormat", "WEShader", "WEVideo", "WEAudio"]),
-        .executableTarget(name: "wecli", dependencies: ["WEFormat", "WERender", "WEShader", "WEWeb", "WEAudio", "WESteam"]),
+        .executableTarget(name: "wecli", dependencies: ["WEFormat", "WERender", "WEShader", "WEWeb", "WEAudio", "WESteam", "WELibrary"]),
         .executableTarget(name: "WallpaperApp", dependencies: ["WERender", "WEWeb", "WEAudio"]),
         // Compiles .metal files through MTLDevice.makeLibrary (used by scripts/shader_batch.py).
         .executableTarget(name: "metalcheck", path: "tools", sources: ["metalcheck.swift"]),

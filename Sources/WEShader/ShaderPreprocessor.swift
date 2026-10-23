@@ -166,10 +166,10 @@ public enum ShaderPreprocessor {
     static func readInclude(_ name: String, fileDirectory: String, locator: AssetLocator, seen: inout Set<String>) -> String {
         let candidates = [fileDirectory + "/" + name, "shaders/" + name]
         for c in candidates {
-            guard let u = locator.url(c) else { continue }
-            if seen.contains(u.path) { return "" }
-            seen.insert(u.path)
-            guard let text = try? String(contentsOf: u, encoding: .utf8) else { continue }
+            guard locator.exists(c), let path = locator.resolvedPath(c) else { continue }
+            if seen.contains(path) { return "" }
+            seen.insert(path)
+            guard let text = try? locator.string(c) else { continue }
             var out = text
             for m in allMatches(#"(?m)^\s*#include\s+"([^"]+)""#, text) {
                 let nested = readInclude(m[1], fileDirectory: fileDirectory, locator: locator, seen: &seen)

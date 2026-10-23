@@ -1,6 +1,6 @@
 # Library backend: `.pkg` asset roots, wallpaper index, compatibility check (implementation spec)
 
-Status: spec for implementation (2026-10-22). Background: `docs/design.md` §6.19 (library, compatibility
+Status: implemented 2026-10-22 (review notes and results: `docs/design.md` §6.22). Background: `docs/design.md` §6.19 (library, compatibility
 badges), §6.21 (Steam module). This is backend only; the SwiftUI library comes later and will consume these
 APIs.
 

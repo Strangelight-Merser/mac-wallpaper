@@ -10,11 +10,13 @@ import WERender
 import WEShader
 import WEAudio
 import WESteam
+import WELibrary
 import CoreImage
 
 func usage() -> Never {
     print("""
     usage:
+      wecli library scan|show [--root <dir>] [--steam] [--downloads] [--assets <dir>] [--deep] [--json] [--index <file>]
       wecli steam login|whoami|logout|details|subs|download
       wecli texinfo <file.tex>...
       wecli tex2png <file.tex> <out.png>
@@ -173,6 +175,15 @@ guard args.count >= 3 else {
 }
 
 switch args[1] {
+case "library":
+    let semaphore = DispatchSemaphore(value: 0)
+    Task.detached {
+        do { try await libraryCommand(Array(args.dropFirst(2))) }
+        catch { print("Library operation failed: \(error)"); exit(1) }
+        semaphore.signal()
+    }
+    semaphore.wait()
+
 case "steam":
     let semaphore = DispatchSemaphore(value: 0)
     Task.detached {
@@ -651,4 +662,85 @@ func steamCommand(_ arguments: [String]) async throws {
         } catch { await client.disconnect(); throw error }
     default: steamUsage()
     }
+}
+
+func libraryUsage() -> Never {
+    print("""
+    wecli library scan [--root <dir>]... [--steam] [--downloads] [--assets <dir>] [--deep] [--json] [--index <file>]
+    wecli library show <folder> [--assets <dir>] [--deep]
+    """)
+    exit(2)
+}
+
+func libraryCommand(_ arguments: [String]) async throws {
+    guard let command = arguments.first, ["scan", "show"].contains(command) else { libraryUsage() }
+    var roots: [LibraryRoot] = [], positional: [String] = [], options: [String: String] = [:], flags = Set<String>()
+    var index = 1
+    while index < arguments.count {
+        let argument = arguments[index]
+        if ["--steam", "--downloads", "--deep", "--json"].contains(argument) { flags.insert(argument) }
+        else if ["--root", "--assets", "--index"].contains(argument) {
+            index += 1
+            guard index < arguments.count, !arguments[index].hasPrefix("--") else { libraryUsage() }
+            if argument == "--root" { roots.append(LibraryRoot(url: URL(fileURLWithPath: arguments[index]), kind: .userFolder)) }
+            else { options[argument] = arguments[index] }
+        } else if argument.hasPrefix("--") { libraryUsage() }
+        else { positional.append(argument) }
+        index += 1
+    }
+    let assets = options["--assets"].map { URL(fileURLWithPath: $0) }
+    let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]; encoder.dateEncodingStrategy = .iso8601
+    if command == "show" {
+        guard positional.count == 1, roots.isEmpty, flags.isDisjoint(with: ["--steam", "--downloads"]), options["--index"] == nil else { libraryUsage() }
+        var entry = WallpaperEntry(folder: URL(fileURLWithPath: positional[0]), root: .userFolder)
+        entry.compatibility = await CompatibilityChecker(assets: assets).check(entry, deep: flags.contains("--deep"))
+        print(String(decoding: try encoder.encode(entry), as: UTF8.self))
+        return
+    }
+    guard positional.isEmpty else { libraryUsage() }
+    if flags.contains("--steam") { roots += LibraryRoots.steamWorkshopRoots() }
+    if flags.contains("--downloads") { roots.append(LibraryRoots.downloads) }
+    guard !roots.isEmpty || flags.contains("--steam") else { libraryUsage() }
+    let temporary = FileManager.default.temporaryDirectory.appendingPathComponent("wecli-library-\(UUID().uuidString)")
+    let indexURL = options["--index"].map { URL(fileURLWithPath: $0) } ?? temporary.appendingPathComponent("library.json")
+    defer { if options["--index"] == nil { try? FileManager.default.removeItem(at: temporary) } }
+    let library = WallpaperLibrary(indexURL: indexURL)
+    let diff = await library.refresh(roots: roots, assets: assets, deep: flags.contains("--deep"))
+    let entries = await library.entries()
+    struct Summary: Encodable {
+        let types: [String: Int]
+        let statuses: [String: Int]
+        let missingFeatures: [String: Int]
+    }
+    struct Output: Encodable { let entries: [WallpaperEntry]; let summary: Summary }
+    let summary = Summary(types: Dictionary(grouping: entries, by: { $0.type.rawValue }).mapValues(\.count),
+        statuses: Dictionary(grouping: entries, by: { $0.compatibility?.status.rawValue ?? "unchecked" }).mapValues(\.count),
+        missingFeatures: Dictionary(uniqueKeysWithValues: Feature.allCases.compactMap { feature in
+            let count = entries.filter { ($0.compatibility?.missing[feature] ?? 0) > 0 }.count
+            return count > 0 ? (feature.rawValue, count) : nil
+        }))
+    if flags.contains("--json") { print(String(decoding: try encoder.encode(Output(entries: entries, summary: summary)), as: UTF8.self)) }
+    else {
+        for entry in entries {
+            let missing = (entry.compatibility?.missing ?? [:]).sorted { $0.key.rawValue < $1.key.rawValue }
+                .map { "\($0.key.rawValue)=\($0.value)" }.joined(separator: ",")
+            print("\(entry.id)  \(entry.type.rawValue)  \(entry.contentRating.rawValue)  \(entry.compatibility?.status.rawValue ?? "unchecked")  \(missing)  \(entry.title)")
+        }
+        print("\(entries.count) wallpapers")
+        for (type, count) in summary.types.sorted(by: { $0.key < $1.key }) {
+            print("  \(type): \(count)")
+        }
+        for (status, count) in summary.statuses.sorted(by: { $0.key < $1.key }) {
+            print("  \(status): \(count)")
+        }
+        // "used by" counts every wallpaper missing the feature; "only blocker" counts those that would
+        // become fully supported if just this feature were added.
+        print("missing features (used by / only blocker):")
+        for (feature, count) in summary.missingFeatures.sorted(by: { $0.value > $1.value }) {
+            let sole = entries.filter { $0.compatibility?.missing.keys.map(\.rawValue) == [feature] }.count
+            print("  \(feature): \(count) / \(sole)")
+        }
+    }
+    for problem in diff.problems { FileHandle.standardError.write(Data((problem + "\n").utf8)) }
+    if !diff.problems.isEmpty { throw WEFormatError.corrupt("could not persist library index") }
 }
