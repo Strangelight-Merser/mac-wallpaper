@@ -1,6 +1,6 @@
 # Download Wallpaper Engine's `assets` folder through Steam (implementation spec)
 
-Status: spec for implementation (2026-10-23). Background: `docs/design.md` §6.19–6.21 and
+Status: implemented and merged (2026-10-23); results in `docs/design.md` §6.25. Background: `docs/design.md` §6.19–6.21 and
 `docs/specs/steam-module.md` (the WESteam module this builds on).
 
 ## 1. Goal

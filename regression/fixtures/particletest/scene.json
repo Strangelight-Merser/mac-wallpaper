@@ -1,0 +1,13 @@
+{
+	"general" : {
+		"clearcolor" : "0.05 0.05 0.08",
+		"orthogonalprojection" : { "width" : 768, "height" : 256 }
+	},
+	"objects" : [
+		{ "id" : 1, "name" : "example", "particle" : "particles/example.json", "origin" : "128 128 0", "visible" : true },
+		{ "id" : 2, "name" : "turbulence", "particle" : "particles/exampleturbolence.json", "origin" : "384 128 0", "visible" : true,
+		  "instanceoverride" : { "count" : 0.05, "colorn" : "1 0.6 0.2" } },
+		{ "id" : 3, "name" : "cursor follow", "particle" : "particles/examplecursorfollow.json", "origin" : "640 128 0", "visible" : true,
+		  "instanceoverride" : { "size" : 2, "rate" : 2 } }
+	]
+}

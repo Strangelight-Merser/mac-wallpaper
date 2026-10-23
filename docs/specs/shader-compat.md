@@ -1,6 +1,6 @@
 # Shader compatibility fixes for real workshop wallpapers (implementation spec)
 
-Status: spec for implementation (2026-10-23). Background: `docs/design.md` §4.2, §6.13 (in-process
+Status: implemented and merged (2026-10-23); results in `docs/design.md` §6.25. Background: `docs/design.md` §4.2, §6.13 (in-process
 glslang + SPIRV-Cross), the existing compatibility rewrites in `Sources/WEShader/ShaderCompat.swift`.
 
 ## 1. Problem

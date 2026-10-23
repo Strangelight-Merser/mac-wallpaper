@@ -540,6 +540,35 @@ SwiftUI（macOS 14），原生 macOS 风格，作为风格讨论的基础；代�
 
 **还没做**：Steam 登录面板和订阅迁移、内嵌创意工坊浏览、每块屏幕分别选壁纸、属性面板、收藏和播放列表、首次引导、检查器里的实时预览、"设为壁纸"之后的加载状态和失败提示。
 
+## 6.24 Steam 登录面板、订阅导入、下载队列（2026-10-22）
+
+代码在 `Sources/WallpaperApp/Steam/`，全部由我写。
+
+- **登录面板**：默认二维码（白色静区，每次轮换即时刷新，扫码后提示"请在手机上确认"），账号密码作为备选；登录后侧边栏出现 Steam 一节（账号、订阅数）。
+- **订阅导入**：订阅清单默认全选，显示大小、类型和汇总；下载在后台排队，工具栏的下载按钮弹出进度，失败项可重试。
+- **共享连接**：同一台 Mac 的所有 CM 登录共用一个机器身份，第二条连接会把第一条顶掉（EResult 34），表现为导入面板和下载队列互相踢下线（错误 5 / 34）。改为全 App 共用一个 `SteamConnection`，会话丢失（5/20/34/48、断线、超时）时自动重连并重试。
+- **钥匙串**：临时签名的开发版每次重新构建后，系统可能拒绝读取之前保存的登录；此时显示原因和"重新登录"按钮，而不是一直转圈。用固定的自签名证书签名可以根治（需要用户输入密码信任证书，未做）。
+- **实测**：扫码登录、订阅列表、两个场景壁纸的下载（约 49 MB）都成功。
+
+## 6.25 粒子系统、真实壁纸里的 shader 问题、WE assets 下载（2026-10-23）
+
+用户的 16 个工坊下载里：视频 3 个支持，场景 12 个部分支持、1 个不支持。缺的功能（用到它的壁纸数）：粒子 10、SceneScript 9、文字 7、声音 5、shader 编译失败 4、视频纹理 1。按这个顺序先做粒子和 shader，三件事按 `docs/specs/particles.md`、`shader-compat.md`、`steam-assets.md` 由 Codex 在三个 worktree 里并行实现（标准档，不开 fast），我审查、实测后合并。
+
+**粒子**（`Sources/WERender/Particles/`，移植自 linux-wallpaperengine 的 CParticle，GPLv3）
+- 球形/盒形发射器，全部常见的初始化器和运算器，sprite 与 spritetrail，精灵图动画，控制点（含跟随鼠标），每个对象的 `instanceoverride`，`starttime` 预模拟，静态子系统。
+- 模拟在 CPU 上确定性运行（按对象 id 和子系统序号设种子；回到更早的时间就从 0 按 1/30 秒重算），离线渲染可以做回归；顶点在 CPU 上组装（每顶点 17 个 float），三缓冲 `MTLBuffer`，用 `genericparticle` 的 `GS_ENABLED=0` 路径。代价约每 1000 个粒子每步 0.2 ms。
+- 审查实测时修的问题：子系统的文件路径写在 `"name"` 里而不是 `"particle"`；`R8`/`RG88` 精灵图要像 WE 的 `ConvertTexture0Format` 那样展开成 `(1,1,1,r)` / `(r,r,r,g)`，否则烟雾变成黑块。
+- 未做（检查器会写明）：事件触发的子系统（eventfollow/eventspawn）、ropetrail、自定义粒子 shader（如演示壁纸 "Shimmering Particles"）。
+- 回归：新增自己的测试场景 `regression/fixtures/particletest`（WE 自带的三个示例粒子：普通、湍流加实例覆盖、跟随鼠标），渲染 1 秒和 3 秒两帧，两次渲染逐像素一致。
+
+**varying 对齐**（`ShaderCompiler.alignVaryingLocations`）：glslang 按各阶段自己的声明顺序给 varying 编号，顶点和片元声明顺序不同时，Metal 会因为位置不匹配拒绝建管线（粒子 shader 首先碰到），或者更糟：位置凑巧匹配但对应错了变量、片元读到 0。现在片元输入按同名变量取顶点阶段的位置，对不上的移到空闲位置并由顶点阶段补 0。副作用是修好了已有的三个回归用例：waterripple 特效以前读到的是 0（现在才真正生效），reflection、shine 两个场景里的雪粒子现在会画出来；逐一看过后更新了参考图。
+
+**shader 兼容**（`Sources/WEShader/ShaderCompat.swift`）：只在第一次编译失败后才改写源码重试，原来能编译的 shader 保持逐字节不变。改写项：CRLF 和 COMBO 写法、bool 参与算术、非常量初始化的全局 const、float 的 `%`（按 fmod 语义）、`mix` 的标量广播。WE assets 加演示壁纸里的 shader 906 个能编译 897 个；Zero Two 等壁纸现在能正常渲染。
+
+**WE assets 下载**（`Sources/WESteam/WEAssets.swift`，`wecli steam assets`）：没有 Windows 电脑的用户拿不到 WE 的 `assets` 文件夹，所以从用户自己的 Steam 账号下载 app 431960 的 Windows depot，只取其中的 `assets/`。先通过 PICS 读 app 信息、选 depot、取 manifest，下载内容前就给出文件数、下载大小和磁盘大小（`--plan`）；下载沿用工坊下载的机制（并行、断点续传、SHA-1 校验、原子替换、字节上限），完成后在旁边写一份收据，之后只比较 manifest 编号就能判断有没有更新，有更新只下改动的文件。离线测试全部通过；**还没有实测**：`--plan` 只取元数据（约 1–3 MB），需要 wecli 能读到 Steam 登录（扫码或钥匙串授权），由用户决定何时做；如果 depot 用 zstd 压缩，会明确报"不支持"。
+
+**下一步候选**：文字（时钟）、SceneScript、声音对象——都要改 `Scene.swift` 和 `SceneRenderer.swift`，所以放在粒子合并之后；App 里的 WE assets 下载和首次引导。
+
 ## 7. 待确认
 1. 最低系统版本：建议 macOS 14（SMAppService、ScreenCaptureKit 音频成熟）。
 2. 工程形态：目前采用 SwiftPM + 生成 .app 的脚本（§6.11）；到需要正式签名分发时，再考虑加一个 Xcode 工程来包装。

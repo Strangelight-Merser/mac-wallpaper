@@ -1,6 +1,6 @@
 # Particle systems (implementation spec)
 
-Status: spec for implementation (2026-10-23). Background: `docs/design.md` §6.19–6.23. Particles are the most
+Status: implemented and merged (2026-10-23); results in `docs/design.md` §6.25. Background: `docs/design.md` §6.19–6.23. Particles are the most
 common missing feature in real wallpapers: 10 of the user's 13 downloaded scene wallpapers use them.
 
 ## 1. Scope

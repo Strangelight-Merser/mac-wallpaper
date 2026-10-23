@@ -154,3 +154,9 @@ effect/fluidsimulation.drag         wallpaper_engine/assets/effects/fluidsimulat
 fixture/audiotest.silent            regression/fixtures/audiotest                        --time 1 --size 768x256
 fixture/audiotest.tones             regression/fixtures/audiotest                        --time 1 --size 768x256 --audio 60,120,250,500,1000,2000,4000:80,300,3000 --pointer 0.85,0.3
 fixture/audiotest.right             regression/fixtures/audiotest                        --time 1 --size 768x256 --audio 60:2000,4000 --pointer 0.7,0.9
+#
+# Particles. particletest is our own fixture (regression/fixtures/particletest) built from WE's stock
+# particle examples: a plain system, turbulence with instance overrides (count, colour), and a
+# mouse-following system (size and rate overrides) chasing --pointer.
+fixture/particletest.t1             regression/fixtures/particletest                     --time 1 --size 768x256 --pointer 0.8,0.4
+fixture/particletest.t3             regression/fixtures/particletest                     --time 3 --size 768x256 --pointer 0.8,0.4
