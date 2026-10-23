@@ -1,4 +1,5 @@
 import AppKit
+import IOKit.ps
 import MetalKit
 import WEAudio
 import WERender
@@ -13,6 +14,8 @@ final class WallpaperController: NSObject, MTKViewDelegate {
         case screensAsleep = "displays asleep"
         case locked = "screen locked"
         case loading = "loading"
+        case battery = "on battery power"
+        case lowPower = "Low Power Mode"
     }
 
     let device = MTLCreateSystemDefaultDevice()!
@@ -51,6 +54,12 @@ final class WallpaperController: NSObject, MTKViewDelegate {
         didSet { renderer?.contentMode = contentMode }
     }
 
+    /// Pause while the Mac runs on battery.
+    var pauseOnBattery = false { didSet { updatePowerPause() } }
+    /// In Low Power Mode: pause instead of halving the frame rate.
+    var pauseInLowPowerMode = false { didSet { updatePowerPause() } }
+    private var powerSource: CFRunLoopSource?
+
     /// Volume of the wallpaper's own sounds (music, effects); 0 = off.
     var soundVolume: Float = 1 {
         didSet { updateSound() }
@@ -87,6 +96,16 @@ final class WallpaperController: NSObject, MTKViewDelegate {
         dnc.addObserver(self, selector: #selector(locked), name: NSNotification.Name("com.apple.screenIsLocked"), object: nil)
         dnc.addObserver(self, selector: #selector(unlocked), name: NSNotification.Name("com.apple.screenIsUnlocked"), object: nil)
         nc.addObserver(self, selector: #selector(powerChanged), name: .NSProcessInfoPowerStateDidChange, object: nil)
+        // Battery ↔ power adapter changes.
+        let context = Unmanaged.passUnretained(self).toOpaque()
+        if let source = IOPSNotificationCreateRunLoopSource({ context in
+            guard let context else { return }
+            let controller = Unmanaged<WallpaperController>.fromOpaque(context).takeUnretainedValue()
+            MainActor.assumeIsolated { controller.updatePowerPause() }
+        }, context)?.takeRetainedValue() {
+            CFRunLoopAddSource(CFRunLoopGetMain(), source, .defaultMode)
+            powerSource = source
+        }
     }
 
     // MARK: - loading
@@ -319,7 +338,22 @@ final class WallpaperController: NSObject, MTKViewDelegate {
     @objc func screensWoke() { setPaused(.screensAsleep, false) }
     @objc func locked() { setPaused(.locked, true) }
     @objc func unlocked() { setPaused(.locked, false) }
-    @objc func powerChanged() { DispatchQueue.main.async { self.applyState() } }
+    @objc func powerChanged() { DispatchQueue.main.async { self.updatePowerPause() } }
+
+    static var onBattery: Bool {
+        guard let info = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
+              let type = IOPSGetProvidingPowerSourceType(info)?.takeUnretainedValue() as String? else { return false }
+        return type == kIOPMBatteryPowerKey
+    }
+
+    /// Applies the battery and Low Power Mode rules (and the reduced frame rate).
+    func updatePowerPause() {
+        let battery = pauseOnBattery && Self.onBattery
+        let lowPower = pauseInLowPowerMode && ProcessInfo.processInfo.isLowPowerModeEnabled
+        if battery != pauseReasons.contains(.battery) { if battery { pauseReasons.insert(.battery) } else { pauseReasons.remove(.battery) } }
+        if lowPower != pauseReasons.contains(.lowPower) { if lowPower { pauseReasons.insert(.lowPower) } else { pauseReasons.remove(.lowPower) } }
+        applyState()
+    }
 
     /// Low Power Mode halves the frame rate.
     var effectiveFPS: Int { ProcessInfo.processInfo.isLowPowerModeEnabled ? max(10, fps / 2) : fps }

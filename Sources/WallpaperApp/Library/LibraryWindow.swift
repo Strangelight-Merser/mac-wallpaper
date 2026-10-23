@@ -67,6 +67,13 @@ final class LibraryWindowController: NSWindowController, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
-        NSApp.setActivationPolicy(.accessory)
+        returnToMenuBarIfNoWindows(closing: window)
     }
+}
+
+/// Back to a menu-bar-only app (no Dock icon) once no library or settings window is open.
+@MainActor
+func returnToMenuBarIfNoWindows(closing: NSWindow?) {
+    let others = NSApp.windows.filter { $0 !== closing && $0.isVisible && $0.styleMask.contains(.titled) }
+    if others.isEmpty { NSApp.setActivationPolicy(.accessory) }
 }
