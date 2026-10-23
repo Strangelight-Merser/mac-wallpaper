@@ -8,6 +8,9 @@ BIN=$(swift build -c release --show-bin-path)
 APP=.build/MacWallpaper.app
 mkdir -p $APP/Contents/MacOS
 cp $BIN/WallpaperApp $APP/Contents/MacOS/MacWallpaper
+# Translations (Localizable.strings per language) go into the bundle's Resources.
+mkdir -p $APP/Contents/Resources
+rsync -a --delete --include '*/' --include '*.strings' --exclude '*' Sources/WallpaperApp/Resources/ $APP/Contents/Resources/
 cat > $APP/Contents/Info.plist <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -16,6 +19,8 @@ cat > $APP/Contents/Info.plist <<PLIST
   <key>CFBundleName</key><string>MacWallpaper</string>
   <key>CFBundleExecutable</key><string>MacWallpaper</string>
   <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleDevelopmentRegion</key><string>en</string>
+  <key>CFBundleLocalizations</key><array><string>en</string><string>zh-Hans</string></array>
   <key>CFBundleShortVersionString</key><string>0.1</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSUIElement</key><true/>

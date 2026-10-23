@@ -11,10 +11,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var controller: WallpaperController!
     var statusItem: NSStatusItem!
     let statusLine = NSMenuItem(title: "", action: nil, keyEquivalent: "")
-    let pauseItem = NSMenuItem(title: "Pause", action: #selector(togglePause), keyEquivalent: "p")
-    let mouseItem = NSMenuItem(title: "Mouse Interaction", action: #selector(toggleMouse), keyEquivalent: "")
-    let audioItem = NSMenuItem(title: "Audio Visualization (System Audio)", action: #selector(toggleAudio), keyEquivalent: "")
+    let pauseItem = NSMenuItem(title: String(localized: "Pause"), action: #selector(togglePause), keyEquivalent: "p")
+    let mouseItem = NSMenuItem(title: String(localized: "Mouse Interaction"), action: #selector(toggleMouse), keyEquivalent: "")
+    let audioItem = NSMenuItem(title: String(localized: "Audio Visualization (System Audio)"), action: #selector(toggleAudio), keyEquivalent: "")
     let fpsMenu = NSMenu()
+    lazy var libraryModel: LibraryModel = {
+        let model = LibraryModel()
+        model.apply = { [weak self] entry in
+            self?.defaults.set(entry.folder.path, forKey: "wallpaper")
+            self?.loadCurrent()
+        }
+        return model
+    }()
+    lazy var libraryWindow = LibraryWindowController(model: libraryModel)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         applyCommandLine()
@@ -26,7 +35,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         controller.onStateChange = { [weak self] in self?.refreshMenu() }
         buildMenu()
         loadCurrent()
+        // First launch: nothing chosen yet, so start in the library.
+        if defaults.string(forKey: "wallpaper") == nil || CommandLine.arguments.contains("--library") { showLibrary() }
     }
+
+    @objc func showLibrary() { libraryWindow.show() }
 
     func applyCommandLine() {
         let args = CommandLine.arguments
@@ -39,11 +52,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func loadCurrent() {
         guard let path = defaults.string(forKey: "wallpaper") else {
-            statusLine.title = "No wallpaper — choose one…"
+            statusLine.title = String(localized: "No wallpaper — choose one…")
             return
         }
         controller.load(wallpaper: URL(fileURLWithPath: path),
                         assets: defaults.string(forKey: "assets").map { URL(fileURLWithPath: $0) })
+        libraryModel.currentPath = path
         log("loading \(path)")
         refreshMenu()
     }
@@ -60,9 +74,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
         pauseItem.target = self
         menu.addItem(pauseItem)
-        let fpsItem = NSMenuItem(title: "Frame Rate", action: nil, keyEquivalent: "")
+        let fpsItem = NSMenuItem(title: String(localized: "Frame Rate"), action: nil, keyEquivalent: "")
         for f in [15, 24, 30, 60] {
-            let i = NSMenuItem(title: "\(f) fps", action: #selector(setFPS(_:)), keyEquivalent: "")
+            let i = NSMenuItem(title: String(localized: "\(f) fps"), action: #selector(setFPS(_:)), keyEquivalent: "")
             i.tag = f; i.target = self
             fpsMenu.addItem(i)
         }
@@ -73,11 +87,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         audioItem.target = self
         menu.addItem(audioItem)
         menu.addItem(.separator())
-        menu.addItem(item("Open Wallpaper Folder…", #selector(chooseWallpaper), "o"))
-        menu.addItem(item("Set Wallpaper Engine Assets Folder…", #selector(chooseAssets), ""))
-        menu.addItem(item("Reload", #selector(reload), "r"))
+        menu.addItem(item(String(localized: "Wallpaper Library…"), #selector(showLibrary), "l"))
+        menu.addItem(item(String(localized: "Open Wallpaper Folder…"), #selector(chooseWallpaper), "o"))
+        menu.addItem(item(String(localized: "Set Wallpaper Engine Assets Folder…"), #selector(chooseAssets), ""))
+        menu.addItem(item(String(localized: "Reload"), #selector(reload), "r"))
         menu.addItem(.separator())
-        menu.addItem(item("Quit", #selector(NSApplication.terminate(_:)), "q", target: NSApp))
+        menu.addItem(item(String(localized: "Quit"), #selector(NSApplication.terminate(_:)), "q", target: NSApp))
         statusItem.menu = menu
         refreshMenu()
     }
@@ -94,7 +109,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard statusItem != nil else { return }
         let name = defaults.string(forKey: "wallpaper").map { ($0 as NSString).lastPathComponent } ?? "—"
         statusLine.title = "\(name): \(controller.statusText)"
-        pauseItem.title = controller.pauseReasons.contains(.user) ? "Resume" : "Pause"
+        pauseItem.title = controller.pauseReasons.contains(.user) ? String(localized: "Resume") : String(localized: "Pause")
         for i in fpsMenu.items { i.state = i.tag == controller.fps ? .on : .off }
         mouseItem.state = controller.mouseInput ? .on : .off
         audioItem.state = controller.audioEnabled ? .on : .off
@@ -120,10 +135,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if !SystemAudioCapture.hasPermission { SystemAudioCapture.requestPermission() }
             guard SystemAudioCapture.hasPermission else {
                 let alert = NSAlert()
-                alert.messageText = "Allow Screen Recording to visualize audio"
-                alert.informativeText = "Audio-reactive wallpapers read what your Mac is playing through ScreenCaptureKit, which macOS lists under Screen & System Audio Recording. Nothing is recorded or saved; only the audio spectrum is used.\n\nTurn on MacWallpaper in System Settings → Privacy & Security → Screen & System Audio Recording, quit and reopen MacWallpaper, then enable this item again."
-                alert.addButton(withTitle: "Open System Settings")
-                alert.addButton(withTitle: "Cancel")
+                alert.messageText = String(localized: "Allow Screen Recording to visualize audio")
+                alert.informativeText = String(localized: "Audio-reactive wallpapers read what your Mac is playing through ScreenCaptureKit, which macOS lists under Screen & System Audio Recording. Nothing is recorded or saved; only the audio spectrum is used.\n\nTurn on MacWallpaper in System Settings → Privacy & Security → Screen & System Audio Recording, quit and reopen MacWallpaper, then enable this item again.")
+                alert.addButton(withTitle: String(localized: "Open System Settings"))
+                alert.addButton(withTitle: String(localized: "Cancel"))
                 NSApp.activate(ignoringOtherApps: true)
                 if alert.runModal() == .alertFirstButtonReturn,
                    let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
@@ -144,14 +159,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc func chooseWallpaper() {
-        if let url = pickFolder("Choose an unpacked Wallpaper Engine scene (folder with project.json)") {
+        if let url = pickFolder(String(localized: "Choose a Wallpaper Engine wallpaper folder (one with project.json)")) {
             defaults.set(url.path, forKey: "wallpaper")
             loadCurrent()
         }
     }
 
     @objc func chooseAssets() {
-        if let url = pickFolder("Choose Wallpaper Engine's “assets” folder") {
+        if let url = pickFolder(String(localized: "Choose Wallpaper Engine’s “assets” folder")) {
             defaults.set(url.path, forKey: "assets")
             loadCurrent()
         }
