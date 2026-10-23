@@ -178,6 +178,15 @@ guard args.count >= 3 else {
 }
 
 switch args[1] {
+case "workshop":
+    let semaphore = DispatchSemaphore(value: 0)
+    Task.detached {
+        do { try await workshopCommand(Array(args.dropFirst(2))) }
+        catch { FileHandle.standardError.write(Data("Workshop: \(error)\n".utf8)); exit(1) }
+        semaphore.signal()
+    }
+    semaphore.wait()
+
 case "library":
     let semaphore = DispatchSemaphore(value: 0)
     Task.detached {
@@ -830,4 +839,150 @@ func libraryCommand(_ arguments: [String]) async throws {
     }
     for problem in diff.problems { FileHandle.standardError.write(Data((problem + "\n").utf8)) }
     if !diff.problems.isEmpty { throw WEFormatError.corrupt("could not persist library index") }
+}
+
+
+func workshopCommand(_ arguments: [String]) async throws {
+    let help = "wecli workshop query [--sort trend|popular|recent|updated|subscribed|relevance] [--search text] [--tag tag] [--exclude tag] [--page-size N] [--cursor cursor] [--json] | subscribe ID | unsubscribe ID | survey [--top N] [--sort trend|popular] [--pkg-headers] [--max-mb N] [--plan] [--json]"
+    guard let command = arguments.first, ["query", "subscribe", "unsubscribe", "survey"].contains(command) else {
+        throw SteamError.malformed(help)
+    }
+    var options: [String: String] = [:], flags = Set<String>(), tags: [String] = [], excluded: [String] = [], ids: [String] = []
+    let allowed: Set<String> = command == "query" ? ["--sort", "--search", "--tag", "--exclude", "--page-size", "--cursor"] : command == "survey" ? ["--top", "--sort", "--max-mb"] : []
+    let switches: Set<String> = command == "query" ? ["--json"] : command == "survey" ? ["--json", "--pkg-headers", "--plan"] : []
+    var i = 1
+    while i < arguments.count {
+        let arg = arguments[i]
+        if switches.contains(arg) { flags.insert(arg) }
+        else if allowed.contains(arg) {
+            i += 1
+            guard i < arguments.count else { throw SteamError.malformed(help) }
+            if arg == "--tag" { tags.append(arguments[i]) }
+            else if arg == "--exclude" { excluded.append(arguments[i]) }
+            else { options[arg] = arguments[i] }
+        } else if arg.hasPrefix("--") { throw SteamError.malformed(help) }
+        else { ids.append(arg) }
+        i += 1
+    }
+    let mutation = command == "subscribe" || command == "unsubscribe"
+    guard mutation ? (ids.count == 1 && UInt64(ids[0]) != nil && UInt64(ids[0]) != 0) : ids.isEmpty else { throw SteamError.malformed(help) }
+    let sort: WorkshopQuery.Sort
+    switch options["--sort"] ?? "trend" {
+    case "trend": sort = .trend(days: 7)
+    case "popular": sort = .popular
+    case "recent" where command == "query": sort = .recent
+    case "updated" where command == "query": sort = .updated
+    case "subscribed" where command == "query": sort = .mostSubscribed
+    case "relevance" where command == "query": sort = .textRelevance
+    default: throw SteamError.malformed(help)
+    }
+    guard let top = Int(options["--top"] ?? "200"), top > 0,
+          let pageSize = Int(options["--page-size"] ?? "100"), (1...100).contains(pageSize),
+          let mb = Double(options["--max-mb"] ?? "10"), mb.isFinite, mb >= 0, mb < Double(Int64.max) / 1048576 else {
+        throw SteamError.malformed(help)
+    }
+    guard let tokens = try SteamKeychain.load() else { throw SteamError.malformed("not logged in; run steam login") }
+    let client = SteamCMClient(machineName: "mac-wallpaper on " + ProcessInfo.processInfo.hostName)
+    func json<T: Encodable>(_ value: T) throws {
+        let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]; encoder.dateEncodingStrategy = .iso8601
+        print(String(decoding: try encoder.encode(value), as: UTF8.self))
+    }
+    do {
+        try await client.connect()
+        let session = try await client.logOn(tokens), browser = WorkshopBrowser(client: client)
+        if mutation {
+            let id = UInt64(ids[0])!
+            if command == "subscribe" { try await browser.subscribe(id) } else { try await browser.unsubscribe(id) }
+            print("\(command): \(id)")
+        } else if command == "query" {
+            let page = try await browser.query(WorkshopQuery(sort: sort, searchText: options["--search"], requiredTags: tags,
+                excludedTags: excluded, pageSize: pageSize), cursor: options["--cursor"] ?? "*")
+            if flags.contains("--json") { try json(page) }
+            else {
+                for item in page.items { print("\(item.id)  \(item.fileSize) bytes  \(item.title)") }
+                print("Total: \(page.total); next cursor: \(page.nextCursor ?? "-")")
+            }
+        } else {
+            var items: [WorkshopItem] = [], seen = Set<UInt64>(), cursors = Set<String>(), cursor = "*"
+            while items.count < top {
+                guard cursors.insert(cursor).inserted else { throw SteamError.malformed("workshop cursor stalled") }
+                let page = try await browser.query(WorkshopQuery(sort: sort, requiredTags: ["Scene", "Everyone"],
+                    excludedTags: ["Mature", "Questionable"], pageSize: min(100, top - items.count)), cursor: cursor)
+                let fresh = page.items.filter { seen.insert($0.id).inserted }
+                items += fresh.filter { $0.result == 1 && $0.appID == 431960 && $0.kind == .scene && $0.rating == .everyone }
+                guard !fresh.isEmpty, let next = page.nextCursor, seen.count < page.total else { break }
+                cursor = next
+            }
+            let downloader = WorkshopDownloader(client: client, session: session)
+            var plans: [DownloadPlan] = [], records: [WorkshopSurvey.Record] = []
+            for item in items {
+                do { plans.append(try await downloader.plan(item)) }
+                catch {
+                    if error is CancellationError { throw error }
+                    records.append(.init(item: item, files: [], assessment: WorkshopSurvey.classify(names: []), error: String(describing: error)))
+                }
+            }
+            let enabled = flags.contains("--pkg-headers"), planOnly = flags.contains("--plan")
+            let initial = enabled ? plans.reduce(Int64(0)) { $0 + WorkshopProbe.initialBytes($1) } : 0
+            let budget = enabled ? Int64(mb * 1048576) : 0
+            FileHandle.standardError.write(Data("Initial content estimate: \(initial) bytes; content cap: \(budget) bytes. Additional header chunks are quoted before each request. Metadata/manifest traffic is additional.\n".utf8))
+            if planOnly {
+                struct ItemCost: Encodable {
+                    let id: UInt64
+                    let fullContentBytes: Int64
+                    let initialProbeBytes: Int64
+                }
+                struct Costs: Encodable {
+                    let items: [ItemCost]
+                    let initialProbeBytes: Int64
+                    let contentBudgetBytes: Int64
+                    let manifestFailures: [UInt64]
+                }
+                let costs = plans.map { ItemCost(id: $0.item.id, fullContentBytes: $0.networkBytes,
+                    initialProbeBytes: enabled ? WorkshopProbe.initialBytes($0) : 0) }
+                if flags.contains("--json") {
+                    try json(Costs(items: costs, initialProbeBytes: initial, contentBudgetBytes: budget,
+                        manifestFailures: records.map { $0.item.id }))
+                } else {
+                    for cost in costs { print("\(cost.id): initial probe \(cost.initialProbeBytes) bytes; full content \(cost.fullContentBytes) bytes") }
+                    for record in records { print("\(record.item.id): manifest unavailable: \(record.error ?? "unknown")") }
+                    print("Initial probe total: \(initial) bytes; content budget: \(budget) bytes; downloaded content: 0 bytes")
+                }
+                await client.disconnect()
+                return
+            }
+            let probe = WorkshopProbe(maxBytes: budget)
+            for plan in plans {
+                var names = plan.manifest.files.filter { !$0.isDirectory && !$0.isSymlink }.map(\.path)
+                var assessment = WorkshopSurvey.classify(names: names), failure: String?
+                if enabled {
+                    do {
+                        let result = try await probe.inspect(plan) { bytes in
+                            FileHandle.standardError.write(Data("Next content chunk: \(bytes) bytes\n".utf8))
+                        }
+                        names = result.names
+                        assessment = WorkshopSurvey.classify(names: names, jsonFiles: result.jsonFiles, packageHeadersComplete: result.packageHeadersComplete)
+                        assessment.notes += result.notes
+                    } catch {
+                        if error is CancellationError { throw error }
+                        failure = String(describing: error)
+                    }
+                }
+                records.append(.init(item: plan.item, files: names, assessment: assessment, error: failure))
+            }
+            let report = WorkshopSurvey.report(records: records, initialProbeBytes: initial, probeBudgetBytes: budget,
+                reservedProbeBytes: await probe.reservedBytes)
+            if flags.contains("--json") { try json(report) }
+            else {
+                print("feature → wallpapers using it / wallpapers where it is the only known blocker")
+                for row in report.rows { print("\(row.feature) → \(row.wallpapersUsing) / \(row.onlyKnownBlocker)  [\(row.support)]") }
+                print("Undetermined: \(report.undeterminedCount)/\(records.count) (\(report.undeterminedShare * 100)%)")
+                for record in records where record.error != nil { print("\(record.item.id): \(record.error!)") }
+                print("Download suggestion (known blockers and filename candidates; advertised sizes):")
+                for item in report.suggestedDownloads { print("\(item.id)  \(item.fileSize) bytes  \(item.title)") }
+                print("Suggested total: \(report.suggestedTotalBytes) bytes; reserved probe bytes: \(report.reservedProbeBytes)")
+            }
+        }
+        await client.disconnect()
+    } catch { await client.disconnect(); throw error }
 }
