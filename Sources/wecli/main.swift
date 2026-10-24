@@ -210,6 +210,15 @@ case "steam":
     }
     semaphore.wait()
 
+case "mdl":
+    guard args.count == 3 else { usage() }
+    do {
+        let mdl = try PuppetModel(data: Data(contentsOf: URL(fileURLWithPath: args[2])))
+        print("MDLV\(mdl.vertexVersion) MDLS\(mdl.skeletonVersion.map(String.init) ?? "none") MDLA\(mdl.animationVersion.map(String.init) ?? "none") stride=\(mdl.vertexStride)")
+        print("vertices=\(mdl.vertices.count) triangles=\(mdl.indices.count / 3) bones=\(mdl.bones.count)")
+        for a in mdl.animations { print("animation \(a.id) \(a.name): fps=\(a.fps) frames=\(a.length) mode=\(a.mode.rawValue)") }
+    } catch { print("MDL: \(error)"); exit(1) }
+
 case "texinfo":
     for p in args.dropFirst(2) {
         do { print("\(p): \(describe(try Tex(data: Data(contentsOf: URL(fileURLWithPath: p)))))") }

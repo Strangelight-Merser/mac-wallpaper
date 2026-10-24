@@ -483,6 +483,22 @@ public final class SceneRenderer: WallpaperRenderer {
             kept[0].element.blending = "normal"
             kept.append((offset: layerPasses[index].count, element: back))
         }
+        let puppet = layer.puppet.flatMap { $0.bones.isEmpty ? nil : $0 }
+        if let puppet, !kept.isEmpty {
+            if kept.count > 1 {
+                var warp = kept[0].element
+                if warp.textures.isEmpty { warp.textures = [nil] }
+                else { warp.textures[0] = nil }
+                warp.binds = [:]
+                warp.target = nil
+                warp.effect = nil
+                warp.blending = kept[kept.count - 1].element.blending
+                kept[kept.count - 1].element.blending = "normal"
+                kept.append((offset: layerPasses[index].count + 1, element: warp))
+            }
+            kept[kept.count - 1].element.combos["SKINNING"] = 1
+            kept[kept.count - 1].element.combos["BONECOUNT"] = puppet.bones.count
+        }
         let passes = kept.map(\.element)
         let size = layerSizes[index]
         guard !passes.isEmpty, size.x > 0, size.y > 0 else { return }
@@ -496,8 +512,11 @@ public final class SceneRenderer: WallpaperRenderer {
         defer { effectProjection = matrix_identity_float4x4 }
         let refresh = uniformsDirty.remove(index) != nil
         let plans = try passes.enumerated().map { i, pass -> PassPlan? in
-            pass.copy != nil ? nil : try self.plan("L\(index).\(kept[i].offset)|\(pass.blending)", pass: pass, layer: layer, model: model,
-                                                   hasPrevious: i > 0, refreshUniforms: refresh)
+            let mesh = i == passes.count - 1 ? puppet : nil
+            let key = "L\(index).\(kept[i].offset)|\(pass.blending)" + (mesh == nil ? "" : "|puppet")
+            return pass.copy != nil ? nil : try self.plan(key, pass: pass, layer: layer, model: model,
+                                                        hasPrevious: i > 0, refreshUniforms: refresh,
+                                                        puppet: mesh, animationLayers: layer.animationLayers)
         }
         // Effect FBOs visible to a pass (layer composites are looked up globally).
         func scope(for pass: SceneDescription.Pass) -> [String: LoadedTexture] {
@@ -582,6 +601,9 @@ public final class SceneRenderer: WallpaperRenderer {
             if last && toScene {
                 target = sceneTarget; mvp = projection * model
                 fullFrameValid = false
+            } else if plan.puppet != nil {
+                target = fbo[drawTo].texture
+                mvp = ortho(left: 0, right: Float(w), bottom: 0, top: Float(h)) * translation([Float(w) / 2, Float(h) / 2, 0])
             } else if first {
                 target = fbo[0].texture
                 mvp = layer.passthrough
@@ -642,6 +664,7 @@ public final class SceneRenderer: WallpaperRenderer {
             case pointer, pointerLast, pointerState, parallaxPosition, effectProjection, effectProjectionInverse
             case audio(bands: Int, right: Bool)
             case particle(String)
+            case bones, bonesAlpha
         }
         struct UniformPlan {
             let bufferIndex: Int
@@ -664,6 +687,7 @@ public final class SceneRenderer: WallpaperRenderer {
         /// Static passes are candidates for layer caching.
         var isDynamic = false
         var usesAudio = false
+        var puppet: PuppetGeometry?
         var particle = false
         var textureKey: [String?] = []
 
@@ -689,6 +713,8 @@ public final class SceneRenderer: WallpaperRenderer {
                 switch m.name {
                 case "g_ModelViewProjectionMatrix", "g_EffectModelViewProjectionMatrix": return .mvp
                 case "g_ModelViewProjectionMatrixInverse": return .mvpInverse
+                case "g_Bones": return .bones
+                case "g_BonesAlpha": return .bonesAlpha
                 case "g_Time": return .time
                 case "g_TexelSize": return .texelSize
                 case "g_TexelSizeHalf": return .texelSizeHalf
@@ -729,7 +755,8 @@ public final class SceneRenderer: WallpaperRenderer {
 
     func plan(_ key: String, pass: SceneDescription.Pass, layer: SceneDescription.ImageLayer?, model: simd_float4x4,
               hasPrevious: Bool, fixedInputs: [String] = [], particle: Bool = false,
-              fixedTextures: [Int: LoadedTexture] = [:], refreshUniforms: Bool = false) throws -> PassPlan {
+              fixedTextures: [Int: LoadedTexture] = [:], refreshUniforms: Bool = false,
+              puppet: PuppetModel? = nil, animationLayers: [PuppetModel.Layer] = []) throws -> PassPlan {
         let textureKey = fixedInputs.isEmpty ? pass.textures : fixedInputs.map { Optional($0) }
         if let p = plans[key], p.textureKey == textureKey {
             // Scripts changed values baked into the uniform templates (alpha, colour, constants).
@@ -814,8 +841,9 @@ public final class SceneRenderer: WallpaperRenderer {
                                          "g_EffectTextureProjectionMatrixInverse"]
         let uniformNames = (program.compiled.vertex.uniforms + program.compiled.fragment.uniforms).map(\.name)
         plan.usesAudio = uniformNames.contains { $0.hasPrefix("g_AudioSpectrum") }
+        if let puppet { plan.puppet = try PuppetGeometry(model: puppet, layers: animationLayers, device: device) }
         plan.particle = particle
-        plan.isDynamic = particle || plan.usesAudio || uniformNames.contains { frameVarying.contains($0) }
+        plan.isDynamic = puppet != nil || particle || plan.usesAudio || uniformNames.contains { frameVarying.contains($0) }
             || sources.values.contains { if case .named = $0 { return true } else { return false } }
         plan.textureKey = textureKey
         plans[key] = plan
@@ -856,7 +884,7 @@ public final class SceneRenderer: WallpaperRenderer {
             pipeline = p
         } else {
             var program = plan.program
-            pipeline = try pipelineState(&program, blend: plan.blend, format: target.pixelFormat, key: plan.programKey, particle: plan.particle)
+            pipeline = try pipelineState(&program, blend: plan.blend, format: target.pixelFormat, key: plan.programKey, particle: plan.particle, puppet: plan.puppet != nil)
             plan.pipelines[target.pixelFormat] = pipeline
         }
 
@@ -875,12 +903,23 @@ public final class SceneRenderer: WallpaperRenderer {
         if let particle {
             enc.setVertexBuffer(particle.vertices, offset: 0, index: Self.vertexBufferIndex)
             enc.setDepthClipMode(.clamp)
+        } else if let puppet = plan.puppet {
+            enc.setVertexBuffer(puppet.vertices, offset: 0, index: Self.vertexBufferIndex)
         } else { enc.setVertexBytes(verts, length: verts.count * 4, index: Self.vertexBufferIndex) }
+        let boneMatrices = plan.puppet.map { $0.model.matrices(layers: $0.layers, time: Double(time)) } ?? []
         for (u, isVertex) in [(plan.vertexUniforms, true), (plan.fragmentUniforms, false)] {
             guard var u else { continue }
             for p in u.patches {
                 let v: [Float]
                 switch p.patch {
+                case .bones:
+                    for (k, matrix) in boneMatrices.enumerated() {
+                        write(matrix.flat, type: p.type, at: p.offset + k * p.stride, into: &u.template)
+                    }
+                    continue
+                case .bonesAlpha:
+                    for k in boneMatrices.indices { write([1], type: p.type, at: p.offset + k * p.stride, into: &u.template) }
+                    continue
                 case .particle(let name): v = particleValues[name] ?? []
                 case .mvp: v = mvp.flat
                 case .mvpInverse: v = mvp.inverse.flat
@@ -913,7 +952,11 @@ public final class SceneRenderer: WallpaperRenderer {
                 write(v, type: p.type, at: p.offset, into: &u.template)
             }
             u.template.withUnsafeBytes { b in
-                if isVertex { enc.setVertexBytes(b.baseAddress!, length: b.count, index: u.bufferIndex) }
+                if b.count > 4096 {
+                    let buffer = device.makeBuffer(bytes: b.baseAddress!, length: b.count)
+                    if isVertex { enc.setVertexBuffer(buffer, offset: 0, index: u.bufferIndex) }
+                    else { enc.setFragmentBuffer(buffer, offset: 0, index: u.bufferIndex) }
+                } else if isVertex { enc.setVertexBytes(b.baseAddress!, length: b.count, index: u.bufferIndex) }
                 else { enc.setFragmentBytes(b.baseAddress!, length: b.count, index: u.bufferIndex) }
             }
         }
@@ -932,6 +975,9 @@ public final class SceneRenderer: WallpaperRenderer {
             enc.drawIndexedPrimitives(type: .triangle, indexCount: particle.count, indexType: .uint32,
                                       indexBuffer: particle.indices, indexBufferOffset: 0)
             enc.setDepthClipMode(.clip)
+        } else if let puppet = plan.puppet {
+            enc.drawIndexedPrimitives(type: .triangle, indexCount: puppet.model.indices.count, indexType: .uint16,
+                                      indexBuffer: puppet.indices, indexBufferOffset: 0)
         } else { enc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4) }
     }
 
@@ -1038,7 +1084,7 @@ public final class SceneRenderer: WallpaperRenderer {
         let isInt = type.hasPrefix("int") || type.hasPrefix("ivec") || type.hasPrefix("uint")
         let count: Int = {
             switch type {
-            case "mat4": return 16
+            case "mat4", "mat4x3": return 16
             case "mat3": return 12 // 3 columns padded to vec4
             default: return Int(type.last.flatMap { Int(String($0)) } ?? 1)
             }
@@ -1205,7 +1251,7 @@ public final class SceneRenderer: WallpaperRenderer {
             o.languageVersion = .version2_3
             return try self.device.makeLibrary(source: msl, options: o).makeFunction(name: "main0")!
         }
-        for (n, _) in compiled.vertex.attributes where n != "a_Position" && n != "a_TexCoord" {
+        for (n, _) in compiled.vertex.attributes where n != "a_Position" && n != "a_TexCoord" && n != "a_BlendIndices" && n != "a_BlendWeights" {
             if shader != "genericparticle" || !ParticleVertices.attributes.contains(where: { $0.name == n }) {
                 warn("\(shader): vertex attribute \(n) not supplied")
             }
@@ -1218,12 +1264,12 @@ public final class SceneRenderer: WallpaperRenderer {
         return p
     }
 
-    func pipelineState(_ program: inout Program, blend: String, format: MTLPixelFormat, key: String, particle: Bool = false) throws -> MTLRenderPipelineState {
+    func pipelineState(_ program: inout Program, blend: String, format: MTLPixelFormat, key: String, particle: Bool = false, puppet: Bool = false) throws -> MTLRenderPipelineState {
         let mode = ["translucent", "additive"].contains(blend) ? blend : "normal"
         if !["normal", "translucent", "additive", "disabled"].contains(blend) {
             warn("blending '\(blend)' treated as normal")
         }
-        let pkey = "\(mode)|\(format.rawValue)" + (particle ? "|particle" : "")
+        let pkey = "\(mode)|\(format.rawValue)" + (particle ? "|particle" : "") + (puppet ? "|puppet" : "")
         if let p = program.pipelines[pkey] { return p }
 
         let pd = MTLRenderPipelineDescriptor()
@@ -1237,7 +1283,15 @@ public final class SceneRenderer: WallpaperRenderer {
         if let a = program.compiled.vertex.attributes["a_TexCoord"] {
             vd.attributes[a].format = .float2; vd.attributes[a].offset = 12; vd.attributes[a].bufferIndex = Self.vertexBufferIndex
         }
-        vd.layouts[Self.vertexBufferIndex].stride = 20
+        if puppet {
+            for (name, format, offset) in [("a_BlendIndices", MTLVertexFormat.uint4, 20), ("a_BlendWeights", .float4, 36)] {
+                if let a = program.compiled.vertex.attributes[name] {
+                    vd.attributes[a].format = format; vd.attributes[a].offset = offset
+                    vd.attributes[a].bufferIndex = Self.vertexBufferIndex
+                }
+            }
+        }
+        vd.layouts[Self.vertexBufferIndex].stride = puppet ? 52 : 20
         pd.vertexDescriptor = particle ? Self.particleVertexDescriptor(attributes: program.compiled.vertex.attributes) : vd
 
         let a = pd.colorAttachments[0]!

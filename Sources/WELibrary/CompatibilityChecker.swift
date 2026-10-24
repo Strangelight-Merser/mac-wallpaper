@@ -112,7 +112,10 @@ public struct CompatibilityChecker: Sendable {
             }
             // A puppet mesh only moves with animations (an MDLA section); without them it shows the plain image.
             if let model = try? locator.json(image), let puppet = model["puppet"] as? String {
-                if let data = try? locator.data(puppet), Self.puppetIsAnimated(data) { add(.puppetWarp) }
+                if let data = try? locator.data(puppet), (try? PuppetModel(data: data)) == nil {
+                    let knownMesh = data.starts(with: Data("MDLV0013\0".utf8)) || data.starts(with: Data("MDLV0023\0".utf8))
+                    if Self.puppetIsAnimated(data) || data.range(of: Data("MDLS".utf8)) != nil || !knownMesh { add(.puppetWarp) }
+                }
             }
             for effect in object["effects"] as? [[String: Any]] ?? [] where props.bool(effect["visible"]) {
                 guard let file = effect["file"] as? String else { add(.missingEffect); continue }

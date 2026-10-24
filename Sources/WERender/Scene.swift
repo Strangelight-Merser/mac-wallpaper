@@ -163,6 +163,8 @@ public struct SceneDescription {
     }
 
     public struct ImageLayer {
+        public internal(set) var puppet: PuppetModel? = nil
+        public internal(set) var animationLayers: [PuppetModel.Layer] = []
         public let id: Int
         public let name: String
         public let origin: SIMD3<Float>
@@ -441,7 +443,20 @@ public struct SceneDescription {
             let fullscreen = (model["fullscreen"] as? Bool) == true
             let depth = parseFloats(props.resolve(obj["parallaxDepth"])) ?? [0, 0]
             drawOrder.append(.image(layers.count))
-            layers.append(ImageLayer(
+            var puppet: PuppetModel?
+            if let path = model["puppet"] as? String {
+                do { puppet = try PuppetModel(data: locator.data(path)) }
+                catch { notes.append("\(name): puppet \(path): \(error); using plain image") }
+            }
+            // TODO: expose puppet play/pause/rate/blend through SceneScript animation-layer APIs.
+            // Runtime.js currently exposes texture animation only (getAnimation/getTextureAnimation).
+            let animationLayers = (obj["animationlayers"] as? [[String: Any]] ?? []).map { layer in
+                PuppetModel.Layer(animation: (props.resolve(layer["animation"]) as? NSNumber)?.intValue ?? 0,
+                                  rate: (props.resolve(layer["rate"]) as? NSNumber)?.floatValue ?? 1,
+                                  blend: (props.resolve(layer["blend"]) as? NSNumber)?.floatValue ?? 1,
+                                  visible: props.bool(layer["visible"]))
+            }
+            layers.append(ImageLayer(puppet: puppet, animationLayers: animationLayers,
                 id: (obj["id"] as? NSNumber)?.intValue ?? -1, name: name,
                 origin: fullscreen ? SIMD3(canvas.x / 2, canvas.y / 2, 0) : v3("origin", 0),
                 scale: fullscreen ? SIMD3(1, 1, 1) : v3("scale", 1),
