@@ -41,6 +41,8 @@ public struct UserBinding {
 extension SceneRenderer {
     public func setUserProperties(_ values: [String: String]) -> Bool {
         let changed = Set(values.keys.filter { String(describing: scene.properties.values[$0] ?? "") != values[$0] })
+        guard changed.isDisjoint(with: scene.properties.textureNames),
+              !scene.layers.flatMap(\.passes).contains(where: { !changed.isDisjoint(with: $0.userTextures.values) }) else { return false }
         let bindings = scene.userBindings.filter { changed.contains($0.name) }
         guard bindings.allSatisfy(\.supportsLive) else { return false }
         for (key, value) in values { scene.properties.values[key] = value }
