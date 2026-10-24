@@ -1,81 +1,79 @@
 # MacWallpaper
 
-A native macOS live-wallpaper app (Swift + Metal) that renders **Wallpaper Engine** scene wallpapers
-directly on the desktop. Status: early but working — see the progress table below.
+**Your Wallpaper Engine wallpapers, on your Mac.** MacWallpaper is a native macOS app (Swift and Metal) that plays
+Wallpaper Engine scene, video and web wallpapers on the desktop, using your own copy of Wallpaper Engine and your own
+Steam Workshop subscriptions.
 
-This project does not ship any Wallpaper Engine content. You need your own copy of Wallpaper Engine's
-`assets` folder and the wallpapers you want to use (e.g. from your Steam Workshop folder).
+[简体中文](README.zh-CN.md)
 
-## What works
+> MacWallpaper is not affiliated with Wallpaper Engine Team or Valve. It ships no Wallpaper Engine content: you need
+> to own Wallpaper Engine on Steam.
 
-| Area | Status |
-|---|---|
-| Desktop app | Menu-bar app, one desktop-level window per screen, pauses on lock / display sleep / fully covered screens, Low Power Mode halves the frame rate |
-| Mouse | Cursor over the desktop drives `g_PointerPosition`/`g_PointerState`, cursor effects (x-ray, ripples, fluid) and camera parallax; web pages get mouse moves and real clicks. No permission needed |
-| Audio | Optional (menu → Audio Visualization): system audio through ScreenCaptureKit (needs the Screen Recording permission) → `g_AudioSpectrum*` in scenes and `wallpaperRegisterAudioListener` in web pages. Captures only while a wallpaper uses it |
-| Formats | `.tex` textures (LZ4, DXT1/3/5, R8/RG88, embedded PNG/JPEG, 3D LUTs, GIF frame tables) |
-| Shaders | WE's GLSL dialect → SPIR-V (glslang) → MSL (SPIRV-Cross), in-process with a disk cache; 97% of the shipped shaders compile |
-| Scenes | Image layers, effect chains incl. multi-FBO effects (blur, god rays, motion blur, fluid simulation…), blend modes, HDR + bloom, user properties, hidden/cross-layer composites, static-layer caching |
-| Official effect previews | 44 of 45 render (the remaining one needs particles) |
-| Video wallpapers | mp4/mov (H.264, HEVC, AV1) and webm (VP9, AV1), hardware-decoded and drawn zero-copy through Metal; VP8 webm through WebKit; looping, cover-fit. Muted for now |
-| Web wallpapers | WKWebView with Wallpaper Engine's JavaScript API (`wallpaperPropertyListener`: user/general properties, `setPaused`; audio listeners; media listener registration), pages served same-origin; paused pages use no CPU |
-| Not yet | Video audio, particles, text, SceneScript, 3D models, a wallpaper library UI |
+## Features
 
-The full design, findings and roadmap (in Chinese) are in [docs/design.md](docs/design.md).
+- **Plays the wallpapers you already have.** Log in to Steam with a QR code, and MacWallpaper downloads Wallpaper
+  Engine's files and your subscriptions from your own account. Already have a Windows PC with Wallpaper Engine?
+  Point it at the copied folders instead.
+- **Browse the Workshop** inside the app: trending, popular, search, type filters. Subscribing downloads the
+  wallpaper (its size is shown first). Previews are fetched small, for slow or metered connections.
+- **Scenes** with effects, particles, text and clocks, sound, audio visualisation, scripts (SceneScript), puppet
+  animation, lights and volumetric light, user textures and presets. **Videos** (H.264, HEVC, AV1, VP9, VP8) and
+  **web wallpapers** with Wallpaper Engine's JavaScript API.
+- **Each wallpaper's settings** (colours, sliders, pictures…) change live from the library.
+- **Native and light**: a menu-bar app; wallpapers pause when the desktop is covered, the screen is locked or the
+  displays sleep, and optionally on battery or in Low Power Mode. Typical scenes use a few milliseconds of GPU time
+  per frame.
+- **Keeps your library up to date**: updates of subscribed wallpapers are checked and installed safely (the old
+  version stays until the new one has fully arrived).
+- English and Simplified Chinese.
+
+How far along is it? In a survey of the 100 trending scene wallpapers on the Workshop (October 2026), puppet
+animation and lights were the features most often missing; both are supported now. 3D models are not supported yet.
+Each wallpaper in your library shows whether it runs fully on your Mac.
 
 ## Requirements
 
-- macOS 14+ on Apple Silicon (developed on macOS 15.6)
-- Xcode 26.3+ (Swift 6.2)
+- A Mac with Apple Silicon, macOS 14 Sonoma or later
+- [Wallpaper Engine](https://store.steampowered.com/app/431960/) on your Steam account
 
-glslang and SPIRV-Cross are compiled into the app from pinned git submodules (`ThirdParty/`); compiled
-shaders are cached in `~/Library/Caches/MacWallpaper/shaders`.
+## Install
 
-## Build and run
+Download `MacWallpaper-<version>.zip` from [Releases](../../releases), unzip it and move **MacWallpaper** to
+Applications.
+
+The app isn't notarized by Apple yet, so macOS asks for confirmation the first time: open it, then go to
+**System Settings → Privacy & Security** and click **Open Anyway** (on macOS 14 you can also right-click the app and
+choose **Open**).
+
+On first launch, a short welcome guides you through logging in to Steam, getting Wallpaper Engine's files and
+choosing wallpapers from your subscriptions.
+
+## Privacy
+
+- Your Steam login is kept in the macOS Keychain. MacWallpaper only talks to Steam (login, Workshop, downloads).
+- Audio visualisation is off until you turn it on. It needs the Screen & System Audio Recording permission; nothing is
+  recorded or saved, only the audio spectrum is used.
+
+## Build from source
+
+Needs Xcode 26.3 or later (Swift 6.2).
 
 ```bash
-git submodule update --init --depth 1
+git clone --recurse-submodules https://github.com/OWNER/REPO.git
+cd REPO
 ./scripts/build.sh
-.build/MacWallpaper.app/Contents/MacOS/MacWallpaper --wallpaper <wallpaper folder> --assets <Wallpaper Engine assets folder>
+open .build/MacWallpaper.app
 ```
 
-The `--wallpaper`/`--assets` paths are remembered; afterwards you can open `.build/MacWallpaper.app`
-directly and change them from the menu-bar icon.
+`scripts/build.sh` signs with your Apple Development certificate if you have one (free with an Apple ID in Xcode),
+which keeps Keychain access working across rebuilds; otherwise it signs ad-hoc. `swift test` runs the tests.
 
-## Regression tests
+The command-line tool `wecli` (built alongside) renders wallpapers to images, inspects Wallpaper Engine's file
+formats, and talks to Steam: run it without arguments for help. `scripts/regress.sh` compares renders against
+reference images; it needs Wallpaper Engine's files and sample wallpapers locally (`samples/`, not in the repository).
 
-```bash
-./scripts/regress.sh --update   # once: render references from your own Wallpaper Engine assets
-./scripts/regress.sh            # render all cases, compare pixels + warnings, one PASS/FAIL summary
-./scripts/regress.sh 'beach'    # only cases whose name matches the regex
-```
-
-Cases are listed in [regression/cases.txt](regression/cases.txt) (4 scenes in several variants, every
-official effect preview at two moments, self-generated test videos — `scripts/make_test_videos.sh`,
-run automatically when needed; requires ffmpeg — web wallpapers including our own bridge fixture
-in `regression/fixtures/webtest`, and mouse/audio input with synthetic pointer paths and tones, including
-our own scene fixture `regression/fixtures/audiotest`). References are renders of Wallpaper Engine assets, so they are
-not committed; they are stored in `regression/refs/` (or `$REGRESSION_REFS`). Failing cases get an
-amplified difference image in `regression/diff/`.
-
-## Command-line tool
-
-`wecli` (in `.build/release/`) is used for development and testing:
-
-```bash
-wecli render <wallpaper> --assets <assets> --time 3 --out frame.png   # offline render of one frame
-wecli render ... --pointer 0.2,0.8:0.6,0.4 --frames 20 --audio 60,500:2000 # with a moving cursor and test tones
-wecli bench  <wallpaper> --assets <assets> --fps 30                   # CPU/GPU cost per frame
-wecli scene  <wallpaper> --assets <assets>                            # dump layers, passes, effect FBOs
-wecli verify <folder>                                                 # decode every .tex, compare with sibling .png
-wecli compare a.png b.png [--diff d.png]                              # exact pixel comparison (exit 0 = equal)
-```
+How it works, design decisions and findings are written up (in Chinese) in [docs/design.md](docs/design.md).
 
 ## License
 
-GPLv3 — see [LICENSE](LICENSE). Parts of the shader preprocessing and pass logic follow
-[linux-wallpaperengine](https://github.com/Almamu/linux-wallpaperengine) (GPLv3); the `.tex`/`.pkg`
-layouts follow [RePKG](https://github.com/notscuffed/repkg) (MIT). Bundled as submodules:
-[glslang](https://github.com/KhronosGroup/glslang) (BSD-3-Clause and others) and
-[SPIRV-Cross](https://github.com/KhronosGroup/SPIRV-Cross) (Apache-2.0). Wallpaper Engine is a product of
-Wallpaper Engine Team / Skutta Software GmbH; this project is not affiliated with it.
+GPL-3.0. See [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
