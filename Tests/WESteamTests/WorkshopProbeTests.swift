@@ -84,4 +84,23 @@ final class WorkshopProbeTests: XCTestCase {
         let count = await server.hosts.count
         XCTAssertEqual(count, 1)
     }
+    func testSceneJSONFromPackagePrefix() throws {
+        let scene = Data(#"{"objects":[{"light":"point"}]}"#.utf8), texture = Data(repeating: 7, count: 1000)
+        var d = Data(); d.appendLE(UInt32(8)); d.append(Data("PKGV0001".utf8)); d.appendLE(UInt32(2))
+        for (name, offset, size) in [("scene.json", 0, scene.count), ("materials/a.tex", scene.count, texture.count)] {
+            d.appendLE(UInt32(name.utf8.count)); d.append(Data(name.utf8)); d.appendLE(UInt32(offset)); d.appendLE(UInt32(size))
+        }
+        let package = d + scene + texture, size = UInt64(package.count)
+        let partial = package.prefix(d.count + scene.count - 1)
+        XCTAssertNil(try WorkshopPackageHeader.file("scene.json", in: partial, fileSize: size))
+        XCTAssertFalse(try WorkshopPackageHeader.enough(partial, fileSize: size, sceneLimit: 1024))
+        // Too big to wait for: the table alone is enough.
+        XCTAssertTrue(try WorkshopPackageHeader.enough(partial, fileSize: size, sceneLimit: 10))
+        let whole = package.prefix(d.count + scene.count)
+        XCTAssertTrue(try WorkshopPackageHeader.enough(whole, fileSize: size, sceneLimit: 1024))
+        XCTAssertEqual(try WorkshopPackageHeader.file("scene.json", in: whole, fileSize: size), scene)
+        XCTAssertNil(try WorkshopPackageHeader.file("materials/a.tex", in: whole, fileSize: size))
+        // No scene.json: the table is enough.
+        XCTAssertTrue(try WorkshopPackageHeader.enough(header(["a.tex"]), fileSize: 1000, sceneLimit: 1024))
+    }
 }

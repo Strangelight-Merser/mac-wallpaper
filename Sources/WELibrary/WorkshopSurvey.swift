@@ -40,8 +40,9 @@ public struct WorkshopSurvey: Sendable {
     public static func classify(names: [String], jsonFiles: [String: Data] = [:],
                                 packageHeadersComplete: Bool = false) -> Assessment {
         var features = Set<String>(), blockers = Set<Feature>()
-        // Runtime execution/decoding is required even when JSON happens to contain a script or texture reference.
-        var unknown: Set<String> = ["sceneScript", "videoTexture", "light", "puppetWarp"]
+        // Unknown means scene.json couldn't be read (or the package table); how well scripts, particle operators
+        // and custom shaders run can't be known without rendering, so those stay notes.
+        var unknown = Set<String>()
         var notes = ["File names indicate assets present, not necessarily active scene objects."]
         let paths = names.map { $0.replacingOccurrences(of: "\\", with: "/").lowercased() }
         for path in paths {
@@ -50,9 +51,9 @@ public struct WorkshopSurvey: Sendable {
                 // .mdl is also used for 2D image meshes: JSON scene objects are needed to establish a blocker.
                 notes.append("\(path): model asset; 3D usage and puppet data undecidable from name")
             }
-            if path.hasPrefix("particles/") { features.insert(Feature.particles.rawValue); unknown.insert("particleOperators") }
+            if path.hasPrefix("particles/") { features.insert(Feature.particles.rawValue) }
             if path.hasPrefix("sounds/") { features.insert(Feature.sound.rawValue) }
-            if path.hasPrefix("shaders/") { features.insert("customShaders"); unknown.insert("shaderError") }
+            if path.hasPrefix("shaders/") { features.insert("customShaders") }
             if path.hasPrefix("fonts/") || [".ttf", ".otf", ".woff", ".woff2"].contains(where: path.hasSuffix) {
                 features.insert("fonts")
             }
@@ -69,21 +70,37 @@ public struct WorkshopSurvey: Sendable {
                 notes.append("project.json type is \(type)")
             }
             guard path.lowercased() == "scene.json", let objects = root["objects"] as? [[String: Any]] else { continue }
-            sceneRead = true; unknown.remove("light")
+            sceneRead = true
+            if Self.containsKey("script", in: root) { features.insert(Feature.sceneScript.rawValue) }
+            var models = false
             for object in objects {
                 // Match CompatibilityChecker's object precedence.
-                if object["particle"] != nil { features.insert(Feature.particles.rawValue); unknown.insert("particleOperators"); continue }
+                if object["particle"] != nil { features.insert(Feature.particles.rawValue); continue }
                 if object["text"] != nil { features.insert(Feature.text.rawValue); continue }
                 if object["sound"] != nil { features.insert(Feature.sound.rawValue); continue }
                 if object["image"] == nil {
-                    if object["model"] != nil { features.insert(Feature.model3D.rawValue); blockers.insert(.model3D) }
+                    if object["model"] != nil {
+                        features.insert(Feature.model3D.rawValue); blockers.insert(.model3D); models = true
+                    }
                     else if object["light"] != nil { features.insert(Feature.light.rawValue); blockers.insert(.light) }
                 }
+            }
+            // Image objects whose model has puppet data reference .mdl files; without 3D model objects in the
+            // scene, .mdl files are puppet meshes.
+            if !models, paths.contains(where: { $0.hasPrefix("models/") && $0.hasSuffix(".mdl") }) {
+                features.remove(Feature.model3D.rawValue)
+                features.insert(Feature.puppetWarp.rawValue); blockers.insert(.puppetWarp)
             }
         }
         if !sceneRead { unknown.insert("sceneObjects") }
         return Assessment(features: features.sorted(), blockers: blockers.sorted { $0.rawValue < $1.rawValue },
                           unknown: unknown.sorted(), notes: notes)
+    }
+
+    static func containsKey(_ key: String, in value: Any) -> Bool {
+        if let object = value as? [String: Any] { return object[key] != nil || object.values.contains { containsKey(key, in: $0) } }
+        if let array = value as? [Any] { return array.contains { containsKey(key, in: $0) } }
+        return false
     }
 
     /// Exact minimum-cardinality cover over unsupported-feature evidence (including model filename candidates).
@@ -118,7 +135,7 @@ public struct WorkshopSurvey: Sendable {
                               probeBudgetBytes: Int64 = 0, reservedProbeBytes: Int64 = 0) -> Report {
         let support: [String: String] = ["model3D": "unsupported", "puppetWarp": "unsupported", "light": "unsupported",
             "particles": "supported subset; operators unknown", "text": "supported", "sound": "supported",
-            "sceneScript": "supported subset; runtime unknown", "videoTexture": "codec-dependent; unknown",
+            "sceneScript": "supported (most of the API)", "videoTexture": "supported",
             "customShaders": "compiler-dependent; unknown", "fonts": "supported"]
         let all = Set(support.keys).union(records.flatMap { $0.assessment.features })
         let rows = all.sorted().map { feature in

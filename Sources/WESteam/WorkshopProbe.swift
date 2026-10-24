@@ -4,6 +4,12 @@ import Foundation
 public enum WorkshopPackageHeader {
     /// nil means more prefix bytes are needed. Invalid tables throw rather than trigger further downloads.
     public static func names(in data: Data, fileSize: UInt64) throws -> [String]? {
+        try entries(in: data, fileSize: fileSize)?.entries.map(\.name)
+    }
+
+    /// The table and where the payload starts; entry offsets are relative to that.
+    public static func entries(in data: Data, fileSize: UInt64) throws
+        -> (payloadStart: Int, entries: [(name: String, offset: UInt64, size: UInt64)])? {
         var offset = 0
         func integer() -> UInt32? {
             guard data.count - offset >= 4 else { return nil }
@@ -35,7 +41,25 @@ public enum WorkshopPackageHeader {
         guard entries.allSatisfy({ $0.1 <= payload && $0.2 <= payload - $0.1 }) else {
             throw SteamError.malformed("PKG entry range")
         }
-        return entries.map(\.0)
+        return (offset, entries.map { (name: $0.0, offset: $0.1, size: $0.2) })
+    }
+
+    /// An entry's bytes if the prefix holds all of them; nil otherwise (or if it's absent).
+    public static func file(_ name: String, in data: Data, fileSize: UInt64) throws -> Data? {
+        guard let table = try entries(in: data, fileSize: fileSize),
+              let entry = table.entries.first(where: { $0.name.lowercased() == name }) else { return nil }
+        let start = table.payloadStart + Int(entry.offset), end = start + Int(entry.size)
+        guard end <= data.count else { return nil }
+        return data.subdata(in: data.startIndex + start..<data.startIndex + end)
+    }
+
+    /// Enough of a package prefix for the survey: the table, plus scene.json (stored first) unless it's bigger
+    /// than `sceneLimit` or missing.
+    static func enough(_ data: Data, fileSize: UInt64, sceneLimit: UInt64) throws -> Bool {
+        guard let table = try entries(in: data, fileSize: fileSize) else { return false }
+        guard let scene = table.entries.first(where: { $0.name.lowercased() == "scene.json" }),
+              scene.size <= sceneLimit else { return true }
+        return table.payloadStart + Int(scene.offset + scene.size) <= data.count
     }
 }
 
@@ -54,6 +78,8 @@ public actor WorkshopProbe {
     private let peek: Peek
     private var inFlight: Int64 = 0
     private let http: SteamHTTP
+    /// Bigger scene.json files aren't read from packages (rare; up to ~260 KB plain seen, compressing ~10×).
+    static let sceneLimit: UInt64 = 512 * 1024
     public init(maxBytes: Int64) {
         self.maxBytes = max(0, maxBytes); http = SteamHTTP()
         peek = { try await ChunkPeek().peek(server: $0, depot: $1, sha: $2, key: $3, enough: $4, maxBytes: $5) }
@@ -94,11 +120,16 @@ public actor WorkshopProbe {
                             for server in plan.servers where read < cap {
                                 do {
                                     let result = try await peek(server, plan.manifest.depotID, chunk.sha, plan.key, {
-                                        try WorkshopPackageHeader.names(in: $0, fileSize: file.size) != nil
+                                        try WorkshopPackageHeader.enough($0, fileSize: file.size, sceneLimit: Self.sceneLimit)
                                     }, cap - read)
                                     read += result.bytesRead
                                     if let entries = try WorkshopPackageHeader.names(in: result.plaintext, fileSize: file.size) {
                                         names += entries; found = true
+                                    }
+                                    // scene.json shows lights, text, scripts and models the names can't.
+                                    if let scene = try WorkshopPackageHeader.file("scene.json", in: result.plaintext,
+                                                                                    fileSize: file.size) {
+                                        json["scene.json"] = scene
                                     }
                                     break
                                 } catch let failure as ChunkPeekFailure {
