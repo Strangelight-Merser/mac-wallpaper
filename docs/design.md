@@ -711,6 +711,18 @@ SwiftUI（macOS 14），原生 macOS 风格，作为风格讨论的基础；代�
 
 **未做**：脚本控制动画层（`getAnimationLayer` 一类接口）。
 
+## 6.35 灯光、体积光、形状图层；脚本控制动画层（2026-10-24，两个 Codex 并行）
+
+**灯光**：场景里的灯光对象（点光、聚光、管状光、平行光）按帧算出场景坐标，同时填两套 WE 着色器接口：老的 4 灯 `g_LightsPosition`/`g_LightsColorRadius`，和新的按类型数组 `g_LPoint_*` 等（数量用 `LIGHTS_*` 组合宏，取 `lightconfig` 与实际数量的较大值）。只有开了 `LIGHTING` 的材质会被照亮。
+
+**体积光**：`castvolumetrics` 的灯光按 WE 资源里的 volumetrics 材质与着色器推出的做法画在后处理里（径向衰减、密度、模糊、叠加）。按正交视图、半分辨率、每灯 24 次采样实现，阴影、cookie、雾的调制没做；推测的部分都在 `enableApproximateVolumetrics` 一个开关后面。「Youth」（10 盏）开销偏大：App 里 GPU 约 19 ms/帧，30 fps 够用，60 fps 不够。
+
+**形状图层**：`"shape": "quad"` 的对象当作效果图层画（`DIRECTDRAW` 的效果直接叠加到场景上），「Youth」顶上的光束因此出现，和 WE 预览一致。
+
+**脚本控制动画层**：`getAnimationLayerCount/getAnimationLayer/createAnimationLayer/destroyAnimationLayer`，动画层有 `rate/blend/visible/play/pause/stop/getFrame/setFrame` 等。动画层状态改为按帧推进（脚本可以暂停、跳帧），没有脚本时结果和按场景时间采样一致；`additive`、`blendin/blendout/blendtime` 也生效了。
+
+**合并时修的问题**：灯光组合宏原本加到所有着色器（没灯光的场景也加了值为 0 的），还加到了粒子上；绳状粒子的程序是用自己的键和打过补丁的源码准备的，于是通用路径编译出未打补丁的版本，回归测试里 3 个绳状粒子用例出错。现在只加场景实际有的灯光类型，且不加给粒子。
+
 ## 7. 待确认
 1. 最低系统版本：建议 macOS 14（SMAppService、ScreenCaptureKit 音频成熟）。
 2. 工程形态：目前采用 SwiftPM + 生成 .app 的脚本（§6.11）；到需要正式签名分发时，再考虑加一个 Xcode 工程来包装。
