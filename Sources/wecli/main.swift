@@ -947,7 +947,7 @@ func workshopCommand(_ arguments: [String]) async throws {
             let enabled = flags.contains("--pkg-headers"), planOnly = flags.contains("--plan")
             let initial = enabled ? plans.reduce(Int64(0)) { $0 + WorkshopProbe.initialBytes($1) } : 0
             let budget = enabled ? Int64(mb * 1048576) : 0
-            FileHandle.standardError.write(Data("Initial content estimate: \(initial) bytes; content cap: \(budget) bytes. Additional header chunks are quoted before each request. Metadata/manifest traffic is additional.\n".utf8))
+            FileHandle.standardError.write(Data("Initial content estimate: \(initial) bytes; content cap: \(budget) bytes. Package peeks estimate 64 KiB and are capped at 256 KiB each. Metadata/manifest traffic is additional.\n".utf8))
             if planOnly {
                 struct ItemCost: Encodable {
                     let id: UInt64
@@ -1002,7 +1002,7 @@ func workshopCommand(_ arguments: [String]) async throws {
                 for record in records where record.error != nil { print("\(record.item.id): \(record.error!)") }
                 print("Download suggestion (known blockers and filename candidates; advertised sizes):")
                 for item in report.suggestedDownloads { print("\(item.id)  \(item.fileSize) bytes  \(item.title)") }
-                print("Suggested total: \(report.suggestedTotalBytes) bytes; reserved probe bytes: \(report.reservedProbeBytes)")
+                print("Suggested total: \(report.suggestedTotalBytes) bytes; probe bytes read: \(report.reservedProbeBytes)")
             }
         }
         await client.disconnect()

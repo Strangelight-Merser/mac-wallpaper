@@ -20,19 +20,41 @@ final class WorkshopProbeTests: XCTestCase {
     }
     func testOnlyHeaderChunksAndGlobalBudget() async throws {
         let h = header(["particles/a.json", "fonts/font.ttf"])
-        let parts = [Data(h.prefix(20)), Data(h.dropFirst(20)), Data(repeating: 1, count: 100)]
-        let (plan, _, server) = try DownloadTests().setup([FileFixture(path: "scene.pkg", data: parts.reduce(Data(), +), chunks: parts)])
-        let budget = Int64(plan.manifest.files[0].chunks.prefix(2).reduce(0) { $0 + $1.compressedSize })
-        let probe = WorkshopProbe(maxBytes: budget, http: server.http)
+        let (plan, _, server) = try DownloadTests().setup([FileFixture(path: "scene.pkg", data: h + Data(repeating: 1, count: 100), chunks: [h, Data(repeating: 1, count: 100)])])
+        let probe = WorkshopProbe(maxBytes: 2000, http: server.http, peek: { _, _, _, _, enough, cap in
+            XCTAssertEqual(cap, 2000)
+            XCTAssertTrue(try enough(h))
+            return (h, 2000)
+        })
         let result = try await probe.inspect(plan)
         XCTAssertTrue(result.packageHeadersComplete); XCTAssertTrue(result.names.contains("particles/a.json"))
-        let requests = await server.hosts.count, used = await probe.reservedBytes
-        XCTAssertEqual(requests, 2); XCTAssertEqual(used, budget)
+        let used = await probe.reservedBytes
+        XCTAssertEqual(used, 2000)
         let second = try await probe.inspect(plan)
         XCTAssertFalse(second.packageHeadersComplete)
+        XCTAssertTrue(second.notes.contains { $0.contains("budget exhausted") })
+        XCTAssertEqual(WorkshopProbe.initialBytes(plan), 65536)
         let count = await server.hosts.count
-        XCTAssertEqual(count, 2)
-        XCTAssertEqual(WorkshopProbe.initialBytes(plan), Int64(plan.manifest.files[0].chunks[0].compressedSize))
+        XCTAssertEqual(count, 0)
+    }
+    func testGiveUpAndFailedServerAccounting() async throws {
+        let h = header(["test"])
+        let (original, _, server) = try DownloadTests().setup([FileFixture(path: "scene.pkg", data: h + Data(repeating: 0, count: 100))])
+        let plan = try DownloadPlan(item: original.item, manifest: original.manifest, key: testKey,
+            servers: [ContentServer(host: "first", vhost: "first"), ContentServer(host: "second", vhost: "second")])
+        let probe = WorkshopProbe(maxBytes: 1000000, http: server.http, peek: { host, _, _, _, _, cap in
+            if host.host == "first" {
+                XCTAssertEqual(cap, 262144)
+                throw ChunkPeekFailure(underlying: SteamError.transport, bytesRead: 100, retryable: true)
+            }
+            XCTAssertEqual(cap, 262044)
+            return (Data(h.prefix(10)), cap)
+        })
+        let result = try await probe.inspect(plan)
+        XCTAssertFalse(result.packageHeadersComplete)
+        XCTAssertTrue(result.notes.contains { $0.contains("peek limit") })
+        let used = await probe.reservedBytes, count = await server.hosts.count
+        XCTAssertEqual(used, 262144); XCTAssertEqual(count, 0)
     }
     func testFailureIsChargedAndNeverRetried() async throws {
         let data = Data("{}".utf8)
@@ -56,9 +78,9 @@ final class WorkshopProbeTests: XCTestCase {
         XCTAssertFalse(skipped.packageHeadersComplete); XCTAssertTrue(skipped.jsonFiles.isEmpty)
         let requests = await server.hosts.count
         XCTAssertEqual(requests, 0)
-        let probe = WorkshopProbe(maxBytes: plan.networkBytes, http: server.http)
+        let probe = WorkshopProbe(maxBytes: plan.networkBytes, http: server.http, peek: { _, _, _, _, _, cap in (h, min(cap, 16)) })
         let result = try await probe.inspect(plan)
-        XCTAssertEqual(result.jsonFiles["scene.json"], data); XCTAssertFalse(result.packageHeadersComplete)
+        XCTAssertEqual(result.jsonFiles["scene.json"], data); XCTAssertTrue(result.packageHeadersComplete)
         let count = await server.hosts.count
         XCTAssertEqual(count, 1)
     }
