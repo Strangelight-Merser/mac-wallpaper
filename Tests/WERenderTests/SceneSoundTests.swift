@@ -1,4 +1,5 @@
 import AVFoundation
+import AudioToolbox
 import WEFormat
 import XCTest
 @testable import WERender
@@ -35,7 +36,15 @@ final class SceneSoundTests: XCTestCase {
     }
 
     func player(_ sounds: [SoundObject]) throws -> SceneSoundPlayer {
-        try SceneSoundPlayer(sounds: sounds, locator: AssetLocator(project: folder, assets: nil), offlineFrames: 4800)
+        for (type, subtype) in [(kAudioUnitType_Output, kAudioUnitSubType_GenericOutput),
+                                (kAudioUnitType_Mixer, kAudioUnitSubType_MultiChannelMixer)] {
+            var description = AudioComponentDescription(componentType: type, componentSubType: subtype,
+                componentManufacturer: kAudioUnitManufacturer_Apple, componentFlags: 0, componentFlagsMask: 0)
+            guard AudioComponentFindNext(nil, &description) != nil else {
+                throw XCTSkip("Required Core Audio component unavailable (type \(type), subtype \(subtype))")
+            }
+        }
+        return try SceneSoundPlayer(sounds: sounds, locator: AssetLocator(project: folder, assets: nil), offlineFrames: 4800)
     }
 
     /// Lets a change reach the mixer (it applies on the next render slice) before measuring silence.

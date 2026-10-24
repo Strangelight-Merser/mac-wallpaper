@@ -1,0 +1,41 @@
+name: Release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+          fetch-depth: 0
+      - name: Select Xcode
+        run: scripts/select-xcode.sh
+      - name: Build
+        env:
+          SIGN: adhoc
+        run: |
+          export VERSION="${GITHUB_REF_NAME#v}"
+          scripts/build.sh
+      - name: Package
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          bin="$(swift build -c release --show-bin-path)"
+          codesign --verify --strict .build/MacWallpaper.app
+          codesign --verify --strict "$bin/wecli"
+          mkdir -p dist
+          ditto -c -k --keepParent .build/MacWallpaper.app "dist/MacWallpaper-$version.zip"
+          ditto -c -k "$bin/wecli" "dist/wecli-$version.zip"
+          cd dist
+          shasum -a 256 "MacWallpaper-$version.zip" "wecli-$version.zip" > "MacWallpaper-$version.sha256"
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          gh release create "$GITHUB_REF_NAME" --verify-tag --draft --title "$GITHUB_REF_NAME" --notes "" \
+            "dist/MacWallpaper-$version.zip" "dist/wecli-$version.zip" "dist/MacWallpaper-$version.sha256"
