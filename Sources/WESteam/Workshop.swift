@@ -44,7 +44,9 @@ public struct WorkshopItem: Sendable, Codable, Equatable {
         self.id = id; self.appID = appID; self.title = title; self.fileSize = fileSize
         self.timeUpdated = timeUpdated; self.contentManifestID = contentManifestID
         self.previewURL = previewURL; self.tags = tags; self.result = result
-        kind = tags.compactMap(Kind.init(rawValue:)).first; rating = tags.compactMap(Rating.init(rawValue:)).first
+        // Presets also carry their base wallpaper's type tag.
+        kind = tags.contains(Kind.preset.rawValue) ? .preset : tags.compactMap(Kind.init(rawValue:)).first
+        rating = tags.compactMap(Rating.init(rawValue:)).first
     }
 }
 

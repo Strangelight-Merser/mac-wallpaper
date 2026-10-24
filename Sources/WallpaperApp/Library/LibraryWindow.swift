@@ -57,6 +57,17 @@ final class LibraryWindowController: NSWindowController, NSWindowDelegate {
                     if let text = env["MW_BROWSE_SEARCH"] { self?.browse.search = text; self?.browse.reload() }
                 }
             }
+            // MW_BROWSE_SUBSCRIBE / MW_BROWSE_UNSUBSCRIBE=<id>: the inspector's buttons, for an item on the first page.
+            for (key, subscribe) in [("MW_BROWSE_SUBSCRIBE", true), ("MW_BROWSE_UNSUBSCRIBE", false)] {
+                guard let id = env[key].flatMap(UInt64.init) else { continue }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 12) { [weak self] in
+                    guard let browse = self?.browse, let item = browse.items.first(where: { $0.id == id }) else {
+                        return log("\(key): \(id) is not on the first page")
+                    }
+                    browse.selection = id
+                    if subscribe { browse.subscribe(item) } else { browse.unsubscribe(item) }
+                }
+            }
             if env["MW_LIBRARY_SHOW"] == "browse", env["MW_LIBRARY_SELECT"] != nil {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 12) { [weak self] in self?.browse.selection = self?.browse.items.first?.id }
             }

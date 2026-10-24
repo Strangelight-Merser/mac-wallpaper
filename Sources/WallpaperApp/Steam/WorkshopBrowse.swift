@@ -37,6 +37,7 @@ final class WorkshopBrowseModel {
     private(set) var total = 0
     private(set) var state: State = .idle
     private(set) var subscribed = Set<UInt64>()
+    private var unsubscribed = Set<UInt64>()
     private var cursor: String? = "*"
     private var generation = 0
     let steam: SteamModel
@@ -90,14 +91,17 @@ final class WorkshopBrowseModel {
     }
 
     func isInLibrary(_ item: WorkshopItem) -> Bool { library.entries.contains { $0.workshopID == item.id } || steam.queue.contains(item.id) }
-    func isSubscribed(_ item: WorkshopItem) -> Bool { subscribed.contains(item.id) || steam.subscriptions.contains { $0.id == item.id } }
+    /// Changes made here win over the synced subscription list (which refreshes only on the next sync).
+    func isSubscribed(_ item: WorkshopItem) -> Bool {
+        subscribed.contains(item.id) || !unsubscribed.contains(item.id) && steam.subscriptions.contains { $0.id == item.id }
+    }
 
     /// Subscribes on Steam (as WE does) and downloads it; the button showed the size.
     func subscribe(_ item: WorkshopItem) {
         Task {
             do {
                 try await steam.connection.run { client, _ in try await WorkshopBrowser(client: client).subscribe(item.id) }
-                subscribed.insert(item.id)
+                subscribed.insert(item.id); unsubscribed.remove(item.id)
                 if !isInLibrary(item) { steam.queue.enqueue([item]) }
             } catch { state = .failed(SteamModel.message(error)) }
         }
@@ -108,7 +112,7 @@ final class WorkshopBrowseModel {
         Task {
             do {
                 try await steam.connection.run { client, _ in try await WorkshopBrowser(client: client).unsubscribe(item.id) }
-                subscribed.remove(item.id)
+                subscribed.remove(item.id); unsubscribed.insert(item.id)
             } catch { state = .failed(SteamModel.message(error)) }
         }
     }
@@ -386,6 +390,11 @@ struct WorkshopInspector: View {
                             Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
                         }
                         .font(.callout)
+                    } else if item.kind == .preset {
+                        Label {
+                            Text("Presets aren’t supported yet. A preset changes the settings of another wallpaper, which it needs too.")
+                        } icon: { Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.yellow) }
+                        .font(.callout).fixedSize(horizontal: false, vertical: true)
                     } else if item.kind == .scene {
                         Text("Whether a scene works fully on this Mac is checked after it downloads.")
                             .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
@@ -393,7 +402,7 @@ struct WorkshopInspector: View {
                     if let text = item.shortDescription, !text.isEmpty {
                         Text(text).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     }
-                    let tags = item.tags.filter { !["Scene", "Video", "Web", "Everyone", "Questionable", "Mature"].contains($0) }
+                    let tags = item.tags.filter { !["Scene", "Video", "Web", "Preset", "Everyone", "Questionable", "Mature"].contains($0) }
                     if !tags.isEmpty {
                         VStack(alignment: .leading, spacing: 6) {
                             Text("Tags").font(.headline)
@@ -432,7 +441,7 @@ struct WorkshopInspector: View {
                     Text("Subscribe and Download (\(item.fileSize.formatted(.byteCount(style: .file))))").frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent).controlSize(.large)
-                .disabled(item.kind == .application)
+                .disabled(item.kind == .application || item.kind == .preset)
             }
             Menu {
                 if browse.isSubscribed(item) {
