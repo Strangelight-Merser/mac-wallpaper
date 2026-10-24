@@ -107,6 +107,25 @@
             set rate(v) { call('animation',id,'rate',v); }
         };
     }
+    const puppetHandles = new WeakMap();
+    const puppetCache = new Map();
+    function puppetAnimation(id, token) {
+        if(token === undefined || token === null) return undefined;
+        const key=id+':'+token;
+        if(puppetCache.has(key)) return puppetCache.get(key);
+        const invoke=(command, value) => call('animationLayer',id,command,{token,value});
+        const handle={
+            play:()=>invoke('play'), pause:()=>invoke('pause'), stop:()=>invoke('stop'),
+            isPlaying:()=>invoke('isPlaying'), getFrame:()=>invoke('frame'), setFrame:v=>invoke('frame',v)
+        };
+        for(const property of ['name','frameCount','fps','duration','rate','blend','visible']) {
+            const descriptor={get:()=>invoke(property)};
+            if(['rate','blend','visible'].includes(property)) descriptor.set=v=>invoke(property,v);
+            Object.defineProperty(handle,property,descriptor);
+        }
+        puppetHandles.set(handle,{id,token}); puppetCache.set(key,handle);
+        return handle;
+    }
     function object(id,prefix='') {
         const cacheKey=id+':'+prefix;
         if(layers.has(cacheKey)) return layers.get(cacheKey);
@@ -116,6 +135,22 @@
             getTransformMatrix: () => ({m:call('matrix',id)}),
             getAnimation: () => anim || (anim=animation(id)),
             getTextureAnimation: () => anim || (anim=animation(id)),
+            getAnimationLayerCount: () => call('animationLayer',id,'count',{}) || 0,
+            getAnimationLayer: selector => puppetAnimation(id,call('animationLayer',id,'find',{selector})),
+            createAnimationLayer: animation => {
+                const token=call('animationLayer',id,'create',{animation});
+                if(token === undefined) throw new Error('Unknown puppet animation');
+                return puppetAnimation(id,token);
+            },
+            destroyAnimationLayer: layer => {
+                const handle=layer && typeof layer==='object' ? puppetHandles.get(layer) : undefined;
+                if(handle && handle.id!==id) return false;
+                const token=handle ? handle.token : typeof layer==='number' ? call('animationLayer',id,'find',{selector:layer}) : undefined;
+                if(token===undefined) return false;
+                const removed=!!call('animationLayer',id,'destroy',{token});
+                if(removed) puppetCache.delete(id+':'+token);
+                return removed;
+            },
             getEffect: name => {
                 const index=typeof name==='number' ? name : call('effect',id,String(name));
                 return index===null ? null : object(id,'effects['+index+'].');

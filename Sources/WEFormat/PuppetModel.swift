@@ -36,8 +36,18 @@ public struct PuppetModel {
         public var rate: Float
         public var blend: Float
         public var visible: Bool
-        public init(animation: Int, rate: Float = 1, blend: Float = 1, visible: Bool = true) {
+        public var id: Int?
+        public var name: String
+        public var additive: Bool
+        public var blendin: Bool
+        public var blendout: Bool
+        public var blendtime: Double
+        public init(animation: Int, rate: Float = 1, blend: Float = 1, visible: Bool = true,
+                    id: Int? = nil, name: String = "", additive: Bool = false,
+                    blendin: Bool = false, blendout: Bool = false, blendtime: Double = 0) {
             self.animation = animation; self.rate = rate; self.blend = blend; self.visible = visible
+            self.id = id; self.name = name; self.additive = additive
+            self.blendin = blendin; self.blendout = blendout; self.blendtime = blendtime
         }
     }
     public let vertexVersion: Int

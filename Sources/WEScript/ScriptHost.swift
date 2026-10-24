@@ -32,6 +32,7 @@ public protocol SceneScriptHost: AnyObject {
     func value(object: Int, property: String) -> ScriptValue?
     func setValue(_ value: ScriptValue, object: Int, property: String)
     func transformMatrix(object: Int) -> simd_double4x4
+    func animationLayerCommand(object: Int, command: String, arguments: [String: Any]) -> Any?
     func animation(object: Int) -> ScriptAnimationHost?
     func log(_ level: ScriptLogLevel, _ message: String)
     // Required scene/effect operations absent from the original API sketch.
@@ -46,6 +47,7 @@ public protocol SceneScriptHost: AnyObject {
 }
 
 public extension SceneScriptHost {
+    func animationLayerCommand(object: Int, command: String, arguments: [String: Any]) -> Any? { nil }
     func soundCommand(object: Int, _ command: String) -> Bool { false }
 }
 

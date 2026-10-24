@@ -162,6 +162,10 @@ public final class SceneScriptEngine {
             let m = host.transformMatrix(object: id)
             return js((0..<4).flatMap { col in (0..<4).map { row in m[col][row] } })
         case "hasAnimation": return js(host.animation(object: id) != nil)
+        case "animationLayer":
+            return host.animationLayerCommand(object: id, command: key,
+                                              arguments: value.toDictionary() as? [String: Any] ?? [:]).map(js)
+                ?? JSValue(undefinedIn: context)
         case "animation":
             guard let animation = host.animation(object: id) else { return js(nil) }
             switch key {

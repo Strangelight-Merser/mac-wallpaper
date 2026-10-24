@@ -448,13 +448,17 @@ public struct SceneDescription {
                 do { puppet = try PuppetModel(data: locator.data(path)) }
                 catch { notes.append("\(name): puppet \(path): \(error); using plain image") }
             }
-            // TODO: expose puppet play/pause/rate/blend through SceneScript animation-layer APIs.
-            // Runtime.js currently exposes texture animation only (getAnimation/getTextureAnimation).
             let animationLayers = (obj["animationlayers"] as? [[String: Any]] ?? []).map { layer in
                 PuppetModel.Layer(animation: (props.resolve(layer["animation"]) as? NSNumber)?.intValue ?? 0,
                                   rate: (props.resolve(layer["rate"]) as? NSNumber)?.floatValue ?? 1,
                                   blend: (props.resolve(layer["blend"]) as? NSNumber)?.floatValue ?? 1,
-                                  visible: props.bool(layer["visible"]))
+                                  visible: props.bool(layer["visible"]),
+                                  id: (props.resolve(layer["id"]) as? NSNumber)?.intValue,
+                                  name: props.resolve(layer["name"]) as? String ?? "",
+                                  additive: props.bool(layer["additive"], default: false),
+                                  blendin: props.bool(layer["blendin"], default: false),
+                                  blendout: props.bool(layer["blendout"], default: false),
+                                  blendtime: (props.resolve(layer["blendtime"]) as? NSNumber)?.doubleValue ?? 0)
             }
             layers.append(ImageLayer(puppet: puppet, animationLayers: animationLayers,
                 id: (obj["id"] as? NSNumber)?.intValue ?? -1, name: name,

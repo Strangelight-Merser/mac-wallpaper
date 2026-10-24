@@ -3,13 +3,14 @@ import WEFormat
 
 struct PuppetGeometry {
     let model: PuppetModel
-    let layers: [PuppetModel.Layer]
+    let state: PuppetAnimationState
     let vertices: MTLBuffer
     let indices: MTLBuffer
 
-    init(model: PuppetModel, layers: [PuppetModel.Layer], device: MTLDevice) throws {
+    init(state: PuppetAnimationState, device: MTLDevice) throws {
+        let model = state.model
         self.model = model
-        self.layers = layers
+        self.state = state
         var words: [UInt32] = []
         for v in model.vertices {
             words += [v.position.x, v.position.y, v.position.z, v.uv.x, v.uv.y].map(\.bitPattern)

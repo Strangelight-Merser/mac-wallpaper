@@ -29,6 +29,7 @@ public final class SceneRenderer: WallpaperRenderer {
     var scriptEngine: SceneScriptEngine?
     public var scriptClock: Date?
     public var scriptStorageURL: URL?
+    var puppetAnimations: [Int: PuppetAnimationState] = [:]
     var lastScriptTime: Double?
     var scriptedLayers = Set<Int>()
     var scriptWarnings = Set<String>()
@@ -220,6 +221,7 @@ public final class SceneRenderer: WallpaperRenderer {
         // Text boxes are laid out before scripts (cursor hit tests need their size) and again after
         // (scripts may change the text); unchanged text is not laid out twice.
         updateTextLayers()
+        preparePuppetAnimations()
         runScripts(projection: projection)
         updateTextLayers()
         let c = scene.clearColor
@@ -512,11 +514,11 @@ public final class SceneRenderer: WallpaperRenderer {
         defer { effectProjection = matrix_identity_float4x4 }
         let refresh = uniformsDirty.remove(index) != nil
         let plans = try passes.enumerated().map { i, pass -> PassPlan? in
-            let mesh = i == passes.count - 1 ? puppet : nil
+            let mesh = i == passes.count - 1 && puppet != nil ? puppetAnimations[layer.id] : nil
             let key = "L\(index).\(kept[i].offset)|\(pass.blending)" + (mesh == nil ? "" : "|puppet")
             return pass.copy != nil ? nil : try self.plan(key, pass: pass, layer: layer, model: model,
                                                         hasPrevious: i > 0, refreshUniforms: refresh,
-                                                        puppet: mesh, animationLayers: layer.animationLayers)
+                                                        puppet: mesh)
         }
         // Effect FBOs visible to a pass (layer composites are looked up globally).
         func scope(for pass: SceneDescription.Pass) -> [String: LoadedTexture] {
@@ -756,7 +758,7 @@ public final class SceneRenderer: WallpaperRenderer {
     func plan(_ key: String, pass: SceneDescription.Pass, layer: SceneDescription.ImageLayer?, model: simd_float4x4,
               hasPrevious: Bool, fixedInputs: [String] = [], particle: Bool = false,
               fixedTextures: [Int: LoadedTexture] = [:], refreshUniforms: Bool = false,
-              puppet: PuppetModel? = nil, animationLayers: [PuppetModel.Layer] = []) throws -> PassPlan {
+              puppet: PuppetAnimationState? = nil) throws -> PassPlan {
         let textureKey = fixedInputs.isEmpty ? pass.textures : fixedInputs.map { Optional($0) }
         if let p = plans[key], p.textureKey == textureKey {
             // Scripts changed values baked into the uniform templates (alpha, colour, constants).
@@ -841,7 +843,7 @@ public final class SceneRenderer: WallpaperRenderer {
                                          "g_EffectTextureProjectionMatrixInverse"]
         let uniformNames = (program.compiled.vertex.uniforms + program.compiled.fragment.uniforms).map(\.name)
         plan.usesAudio = uniformNames.contains { $0.hasPrefix("g_AudioSpectrum") }
-        if let puppet { plan.puppet = try PuppetGeometry(model: puppet, layers: animationLayers, device: device) }
+        if let puppet { plan.puppet = try PuppetGeometry(state: puppet, device: device) }
         plan.particle = particle
         plan.isDynamic = puppet != nil || particle || plan.usesAudio || uniformNames.contains { frameVarying.contains($0) }
             || sources.values.contains { if case .named = $0 { return true } else { return false } }
@@ -906,7 +908,7 @@ public final class SceneRenderer: WallpaperRenderer {
         } else if let puppet = plan.puppet {
             enc.setVertexBuffer(puppet.vertices, offset: 0, index: Self.vertexBufferIndex)
         } else { enc.setVertexBytes(verts, length: verts.count * 4, index: Self.vertexBufferIndex) }
-        let boneMatrices = plan.puppet.map { $0.model.matrices(layers: $0.layers, time: Double(time)) } ?? []
+        let boneMatrices = plan.puppet?.state.matrices ?? []
         for (u, isVertex) in [(plan.vertexUniforms, true), (plan.fragmentUniforms, false)] {
             guard var u else { continue }
             for p in u.patches {
