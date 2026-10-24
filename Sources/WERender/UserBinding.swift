@@ -28,8 +28,9 @@ public struct UserBinding {
 
     var supportsLive: Bool {
         if path.contains(".scriptproperties.") { return true }
-        if object == nil { return ["clearcolor", "bloom", "bloomstrength", "bloomhdrstrength", "bloomthreshold", "bloomhdrthreshold"].contains(path) }
+        if object == nil { return ["ambientcolor", "skylightcolor", "clearcolor", "bloom", "bloomstrength", "bloomhdrstrength", "bloomthreshold", "bloomhdrthreshold"].contains(path) }
         if ["visible", "alpha", "brightness", "color", "origin", "scale", "angles", "text", "volume",
+            "intensity", "radius", "exponent", "density", "volumetricsexponent", "castvolumetrics", "coneangle", "coneangleouter", "length",
             "pointsize", "horizontalalign", "verticalalign", "maxwidth", "padding"].contains(path) { return true }
         if path.hasPrefix("instanceoverride.") {
             return ["alpha", "size", "speed", "count", "rate", "lifetime", "colorn", "color"].contains(String(path.dropFirst("instanceoverride.".count)))
@@ -57,6 +58,8 @@ extension SceneRenderer {
             } else {
                 let number = Self.floats(value)?.first
                 switch binding.path {
+                case "ambientcolor": if let color = Self.vec3(value) { scene.ambientColor = color }
+                case "skylightcolor": if let color = Self.vec3(value) { scene.skylightColor = color }
                 case "clearcolor": if let color = Self.vec3(value) { scene.clearColor = color }
                 case "bloom": scene.bloom.enabled = scene.properties.bool(binding.raw, default: false)
                 case "bloomstrength" where !scene.hdr, "bloomhdrstrength" where scene.hdr:

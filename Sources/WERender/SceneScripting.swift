@@ -206,6 +206,7 @@ extension SceneRenderer: SceneScriptHost {
             if values.count == 1 { return .number(Double(values[0])) }
             return .vec3(SIMD3(Double(values[0]), Double(values[1]), Double(values[2])))
         }
+        if let light = scene.lights.first(where: { $0.id == id }), let value = light.scriptValue(property) { return value }
         let layerIndex = layerIndexByID[id]
         let layer = layerIndex.map { scene.layers[$0] }
         func v3(_ v: SIMD3<Float>) -> ScriptValue { .vec3(SIMD3(Double(v.x), Double(v.y), Double(v.z))) }
@@ -251,6 +252,7 @@ extension SceneRenderer: SceneScriptHost {
     }
 
     public func setValue(_ value: ScriptValue, object id: Int, property: String) {
+        if let index = scene.lights.firstIndex(where: { $0.id == id }), scene.lights[index].setScriptValue(value, property) { return }
         let layerIndex = layerIndexByID[id]
         switch property {
         case "origin", "scale", "angles":

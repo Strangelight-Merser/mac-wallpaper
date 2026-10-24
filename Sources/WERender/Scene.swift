@@ -165,6 +165,7 @@ public struct SceneDescription {
     public struct ImageLayer {
         public internal(set) var puppet: PuppetModel? = nil
         public internal(set) var animationLayers: [PuppetModel.Layer] = []
+        public var isShape = false
         public let id: Int
         public let name: String
         public let origin: SIMD3<Float>
@@ -222,6 +223,10 @@ public struct SceneDescription {
 
     public let canvas: SIMD2<Float>
     public internal(set) var clearColor: SIMD3<Float>
+    public internal(set) var lights: [SceneLight] = []
+    public internal(set) var ambientColor: SIMD3<Float> = SIMD3(repeating: 0.3)
+    public internal(set) var skylightColor: SIMD3<Float> = SIMD3(repeating: 0.3)
+    public private(set) var lightConfig: [String: Int] = [:]
     public let hdr: Bool
     public internal(set) var bloom: (enabled: Bool, strength: Float, threshold: Float)
     public let parallax: Parallax
@@ -252,6 +257,12 @@ public struct SceneDescription {
         let scene = try locator.json(file)
         let general = scene["general"] as? [String: Any] ?? [:]
         userBindings += UserBinding.discover(general, object: nil)
+        func lightColor(_ key: String) -> SIMD3<Float> {
+            let c = parseFloats(props.resolve(general[key])) ?? [0.3, 0.3, 0.3]
+            return SIMD3(c[0], c[safe: 1] ?? c[0], c[safe: 2] ?? c[0])
+        }
+        ambientColor = lightColor("ambientcolor"); skylightColor = lightColor("skylightcolor")
+        lightConfig = Pass.intCombos(general["lightconfig"])
         func f(_ k: String, _ d: Float) -> Float { parseFloats(props.resolve(general[k]))?.first ?? d }
         particleCamera = (f("fov", 50), f("nearz", 0.01), f("farz", 10000))
         let ortho = general["orthogonalprojection"] as? [String: Any]
@@ -321,6 +332,11 @@ public struct SceneDescription {
                 } catch { notes.append("\(name): particle asset: \(error)") }
                 continue
             }
+            if obj["light"] != nil {
+                if let light = SceneLight(obj, properties: props) { lights.append(light) }
+                else { notes.append("\(name): unknown light kind") }
+                continue
+            }
             var model: [String: Any] = [:]
             var passes: [Pass]
             var text: TextObject?
@@ -331,6 +347,10 @@ public struct SceneDescription {
                 let material = try locator.json(matPath)
                 userBindings += UserBinding.discover(material, object: (obj["id"] as? NSNumber)?.intValue, path: "material")
                 passes = (material["passes"] as? [[String: Any]] ?? []).map { Pass(material: $0, label: "base", properties: props) }
+            } else if let shape = props.resolve(obj["shape"]) as? String {
+                guard shape == "quad" else { notes.append("\(name): unsupported shape \(shape)"); continue }
+                model = ["width": canvas.x, "height": canvas.y]
+                passes = []
             } else if obj["text"] != nil {
                 // WE draws glyph coverage with the `font` shader (g_Color4 = colour, alpha) into the text box.
                 let t = TextObject(object: obj, properties: props)
@@ -461,7 +481,7 @@ public struct SceneDescription {
                                   blendtime: (props.resolve(layer["blendtime"]) as? NSNumber)?.doubleValue ?? 0)
             }
             layers.append(ImageLayer(puppet: puppet, animationLayers: animationLayers,
-                id: (obj["id"] as? NSNumber)?.intValue ?? -1, name: name,
+                isShape: obj["shape"] != nil, id: (obj["id"] as? NSNumber)?.intValue ?? -1, name: name,
                 origin: fullscreen ? SIMD3(canvas.x / 2, canvas.y / 2, 0) : v3("origin", 0),
                 scale: fullscreen ? SIMD3(1, 1, 1) : v3("scale", 1),
                 angles: fullscreen ? SIMD3(0, 0, 0) : v3("angles", 0),
