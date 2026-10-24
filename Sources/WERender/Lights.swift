@@ -110,10 +110,12 @@ struct LightUniforms {
 }
 
 extension SceneDescription {
+    /// Only the kinds the scene has: scenes without lights compile exactly as before.
     var lightCombos: [String: Int] {
-        Dictionary(uniqueKeysWithValues: SceneLight.Kind.allCases.map { kind in
+        Dictionary(uniqueKeysWithValues: SceneLight.Kind.allCases.compactMap { kind in
             let key = String(kind.rawValue.dropFirst())
-            return ("LIGHTS_" + key.uppercased(), max(lightConfig[key] ?? 0, lights.filter { $0.kind == kind }.count))
+            let count = max(lightConfig[key] ?? 0, lights.filter { $0.kind == kind }.count)
+            return count > 0 ? ("LIGHTS_" + key.uppercased(), count) : nil
         })
     }
 }

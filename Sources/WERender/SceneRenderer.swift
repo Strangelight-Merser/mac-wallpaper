@@ -828,7 +828,8 @@ public final class SceneRenderer: WallpaperRenderer {
 
         // Sampler-linked combos (e.g. MASK) turn on when their slot has a texture.
         var combos = pass.combos.reduce(into: [String: Int]()) { $0[$1.key.uppercased()] = $1.value }
-        combos.merge(scene.lightCombos) { _, new in new }
+        // Particles render unlit (their programs are prepared with their own combos and key).
+        if !particle { combos.merge(scene.lightCombos) { _, new in new } }
         for a in try rawAnnotations(pass.shader) where a.type.hasPrefix("sampler") {
             if let combo = a.combo, let i = Int(a.name.dropFirst(9)), sources[i] != nil,
                i < max(pass.textures.count, fixedInputs.count), combos[combo.uppercased()] == nil {
