@@ -29,7 +29,7 @@ public struct Compatibility: Codable, Sendable, Equatable {
 
 /// Checks local assets and unsupported features without needing a GPU for static checks.
 public struct CompatibilityChecker: Sendable {
-    public static let version = 8
+    public static let version = 9
     private let assets: URL?
 
     public init(assets: URL?) { self.assets = assets }
@@ -89,6 +89,11 @@ public struct CompatibilityChecker: Sendable {
         return await DeepCheck.shared.check(entry, assets: assets, result: result)
     }
 
+    /// `.mdl` files: MDLV (mesh), then optionally MDLS (skeleton) and MDLA (animations).
+    static func puppetIsAnimated(_ data: Data) -> Bool {
+        data.range(of: Data("MDLA".utf8)) != nil
+    }
+
     private func checkScene(_ entry: WallpaperEntry, locator: AssetLocator) throws -> Compatibility {
         let raw = try locator.json(entry.file)
         let project = try locator.json("project.json")
@@ -105,7 +110,10 @@ public struct CompatibilityChecker: Sendable {
                 else if !object.isEmpty, object["origin"] == nil, object["parent"] == nil { add(.unknownObject) }
                 continue
             }
-            if let model = try? locator.json(image), model["puppet"] != nil { add(.puppetWarp) }
+            // A puppet mesh only moves with animations (an MDLA section); without them it shows the plain image.
+            if let model = try? locator.json(image), let puppet = model["puppet"] as? String {
+                if let data = try? locator.data(puppet), Self.puppetIsAnimated(data) { add(.puppetWarp) }
+            }
             for effect in object["effects"] as? [[String: Any]] ?? [] where props.bool(effect["visible"]) {
                 guard let file = effect["file"] as? String else { add(.missingEffect); continue }
                 do {

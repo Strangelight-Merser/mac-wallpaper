@@ -76,9 +76,14 @@ final class LibraryTests: LibraryTestCase {
     func testPuppetVideoTexturesAndMissingAssets() async throws {
         let folder = try scene()
         let checker = CompatibilityChecker(assets: temporary)
-        try json("project/models/test.json", ["material": "materials/test.json", "puppet": [:]])
-        try write("project/materials/test.tex", texture(videoFlag: true))
+        try json("project/models/test.json", ["material": "materials/test.json", "puppet": "models/test_puppet.mdl"])
+        // A puppet mesh without animations shows the plain image.
+        try write("project/models/test_puppet.mdl", Data("MDLV0023\0".utf8) + Data(count: 64))
         var result = await checker.check(WallpaperEntry(folder: folder, root: .userFolder), deep: false)
+        XCTAssertNil(result.missing[.puppetWarp])
+        try write("project/models/test_puppet.mdl", Data("MDLV0023\0".utf8) + Data(count: 64) + Data("MDLS0004\0MDLA0006\0".utf8))
+        try write("project/materials/test.tex", texture(videoFlag: true))
+        result = await checker.check(WallpaperEntry(folder: folder, root: .userFolder), deep: false)
         XCTAssertEqual(result.status, .unsupported); XCTAssertEqual(result.missing[.puppetWarp], 1); XCTAssertEqual(result.missing[.videoTexture], 1)
         try write("project/materials/test.tex", texture(mp4: true))
         result = await checker.check(WallpaperEntry(folder: folder, root: .userFolder), deep: false)
