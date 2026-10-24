@@ -6,6 +6,7 @@ import WEScript
 /// User-adjustable properties from project.json (`general.properties`), plus CLI/app overrides.
 public struct UserProperties {
     public var values: [String: Any]
+    public let textureNames: Set<String>
 
     public init(project: [String: Any], overrides: [String: String] = [:]) {
         var v: [String: Any] = [:]
@@ -13,6 +14,7 @@ public struct UserProperties {
         for (k, p) in props { if let p = p as? [String: Any], let value = p["value"] { v[k] = value } }
         for (k, s) in overrides { v[k] = s }
         values = v
+        textureNames = Set(props.compactMap { ($0.value as? [String: Any])?["type"] as? String == "scenetexture" ? $0.key : nil })
     }
 
     /// Resolve a scene value that may be bound to a user property:
@@ -59,6 +61,8 @@ public struct SceneDescription {
         public var shader: String
         /// Texture per slot; nil = engine-provided (previous pass output for effects).
         public var textures: [String?]
+        public var userTextures: [Int: String] = [:]
+        var originalTextures: [String?] = []
         public var blending: String
         public var constants: [String: Any]
         public var combos: [String: Int]
@@ -85,6 +89,7 @@ public struct SceneDescription {
         init(material: [String: Any], label: String, properties: UserProperties = UserProperties(project: [:])) {
             shader = material["shader"] as? String ?? "genericimage"
             textures = (material["textures"] as? [Any] ?? []).map { properties.resolve($0) as? String }
+            userTextures = Self.textureMap(material["usertextures"])
             blending = material["blending"] as? String ?? "normal"
             constants = (material["constantshadervalues"] as? [String: Any] ?? [:]).mapValues { properties.resolve($0) ?? NSNull() }
             combos = Self.intCombos((material["combos"] as? [String: Any])?.mapValues { properties.resolve($0) ?? NSNull() })
@@ -108,13 +113,16 @@ public struct SceneDescription {
 
         /// Apply an effect instance's per-pass override (from scene.json).
         mutating func apply(override o: [String: Any], properties: UserProperties) {
+            let userOverrides = Self.textureMap(o["usertextures"])
             for (k, v) in Self.intCombos((o["combos"] as? [String: Any])?.mapValues { properties.resolve($0) ?? NSNull() }) { combos[k] = v }
             for (k, v) in o["constantshadervalues"] as? [String: Any] ?? [:] { constants[k] = properties.resolve(v) }
             for (i, t) in (o["textures"] as? [Any] ?? []).enumerated() {
                 guard let name = properties.resolve(t) as? String else { continue }
                 while textures.count <= i { textures.append(nil) }
                 textures[i] = name
+                userTextures[i] = nil
             }
+            userTextures.merge(userOverrides) { _, new in new }
         }
     }
 
@@ -340,6 +348,13 @@ public struct SceneDescription {
                 continue
             }
 
+            if !passes.isEmpty {
+                let instance = obj["instance"] as? [String: Any] ?? [:]
+                let additions = Pass.textureMap(instance["usertextures"])
+                passes[0].userTextures.merge(additions) { existing, _ in existing }
+                passes[0].userTextures.merge(Pass.textureMap(obj["usertextures"])) { existing, _ in existing }
+            }
+
             var effectNames: [String] = []
             var effectFBOs: [[EffectFBO]] = []
             var effectSlots: [Int: Int] = [:], hiddenEffects = Set<Int>()
@@ -406,6 +421,12 @@ public struct SceneDescription {
                     effectFBOs.append((def["fbos"] as? [[String: Any]] ?? []).map(EffectFBO.init))
                 } catch {
                     notes.append("\(name): effect \(ename): \(error)")
+                }
+            }
+
+            for i in passes.indices {
+                passes[i].resolveUserTextures(properties: props, locator: locator) { message in
+                    if !notes.contains(message) { notes.append(message) }
                 }
             }
 

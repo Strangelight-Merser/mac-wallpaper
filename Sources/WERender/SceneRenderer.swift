@@ -110,6 +110,7 @@ public final class SceneRenderer: WallpaperRenderer {
 
     var programs: [String: Program] = [:]
     var textures: [String: LoadedTexture] = [:]
+    var failedUserTextures = Set<String>()
     var videoTextures: [URL: VideoTexture] = [:]
     /// Text layers by layer index, and text set by scripts (overriding the static value).
     var textStates: [Int: TextLayerState] = [:]
@@ -206,6 +207,12 @@ public final class SceneRenderer: WallpaperRenderer {
             do {
                 textures[name] = try texture.video!.frame(at: Double(time), clamp: texture.clamp, commandBuffer: commandBuffer)
             } catch { warn("\(name): video textures: \(error)") }
+        }
+
+        for (name, texture) in textures {
+            guard let animation = texture.animation else { continue }
+            do { textures[name] = try animation.frame(at: Double(time), device: device) }
+            catch { warn("\(name): user texture: \(error)") }
         }
 
         let projection = contentProjection(canvas: scene.canvas, output: outputSize, mode: contentMode)
@@ -658,6 +665,7 @@ public final class SceneRenderer: WallpaperRenderer {
         var isDynamic = false
         var usesAudio = false
         var particle = false
+        var textureKey: [String?] = []
 
         init(label: String, program: Program, programKey: String, blend: String, inputs: [Int: Input],
              bindings: [(isVertex: Bool, slot: Int, texture: Int, sampler: Int)]) {
@@ -722,7 +730,8 @@ public final class SceneRenderer: WallpaperRenderer {
     func plan(_ key: String, pass: SceneDescription.Pass, layer: SceneDescription.ImageLayer?, model: simd_float4x4,
               hasPrevious: Bool, fixedInputs: [String] = [], particle: Bool = false,
               fixedTextures: [Int: LoadedTexture] = [:], refreshUniforms: Bool = false) throws -> PassPlan {
-        if let p = plans[key] {
+        let textureKey = fixedInputs.isEmpty ? pass.textures : fixedInputs.map { Optional($0) }
+        if let p = plans[key], p.textureKey == textureKey {
             // Scripts changed values baked into the uniform templates (alpha, colour, constants).
             if refreshUniforms {
                 let textures = p.inputs.compactMapValues { if case .fixed(let t) = $0 { return t } else { return nil } }
@@ -733,13 +742,23 @@ public final class SceneRenderer: WallpaperRenderer {
             return p
         }
 
+        if plans[key] != nil { layerCaches.removeAll() }
+
         // Slot sources: explicit textures, else (effects) slot 0 = previous pass output.
         var sources: [Int: PassPlan.Input] = [:]
         for (slot, name) in (fixedInputs.isEmpty ? pass.textures : fixedInputs.map { Optional($0) }).enumerated() {
             guard let name else { continue }
             if fixedTextures[slot] == nil {
                 // Text and video textures are replaced: look them up at draw time.
-                sources[slot] = try textureInput(name)
+                if name.hasPrefix("$file:") {
+                    do { sources[slot] = try textureInput(name) }
+                    catch {
+                        warn("\(name): user texture unavailable")
+                        if let original = pass.originalTextures[safe: slot] ?? nil {
+                            sources[slot] = try textureInput(original)
+                        }
+                    }
+                } else { sources[slot] = try textureInput(name) }
             }
         }
         for (slot, texture) in fixedTextures { sources[slot] = .fixed(texture) }
@@ -761,7 +780,7 @@ public final class SceneRenderer: WallpaperRenderer {
         // expand R8/RG88 and decode DXT normal maps as WE does (materials may still override).
         for (slot, src) in sources {
             if case .fixed(let t) = src, combos["TEX\(slot)FORMAT"] == nil { combos["TEX\(slot)FORMAT"] = t.formatCode }
-            if case .named(let name) = src, textures[name]?.video != nil, combos["TEX\(slot)FORMAT"] == nil {
+            if case .named(let name) = src, (textures[name]?.video != nil || textures[name]?.animation != nil), combos["TEX\(slot)FORMAT"] == nil {
                 combos["TEX\(slot)FORMAT"] = 0
             }
         }
@@ -798,6 +817,7 @@ public final class SceneRenderer: WallpaperRenderer {
         plan.particle = particle
         plan.isDynamic = particle || plan.usesAudio || uniformNames.contains { frameVarying.contains($0) }
             || sources.values.contains { if case .named = $0 { return true } else { return false } }
+        plan.textureKey = textureKey
         plans[key] = plan
         return plan
     }
@@ -1041,7 +1061,7 @@ public final class SceneRenderer: WallpaperRenderer {
     private func textureInput(_ name: String) throws -> PassPlan.Input {
         if name.hasPrefix("_rt_") || name.hasPrefix("$text:") { return .named(name) }
         let texture = try resolveTexture(name)
-        return texture.video == nil ? .fixed(texture) : .named(name)
+        return texture.video == nil && texture.animation == nil ? .fixed(texture) : .named(name)
     }
 
     func resolveTexture(_ name: String) throws -> LoadedTexture {
@@ -1057,6 +1077,25 @@ public final class SceneRenderer: WallpaperRenderer {
                 return t
             }
             if let t = textures[name] { return t }
+            if name.hasPrefix("$file:") {
+                guard !failedUserTextures.contains(name) else { throw WEFormatError.corrupt("user texture") }
+                let url = URL(fileURLWithPath: String(name.dropFirst(6)))
+                do {
+                    let loaded: LoadedTexture
+                    if ["mp4", "m4v", "mov", "webm"].contains(url.pathExtension.lowercased()) {
+                        let video = try videoTextures[url] ?? VideoTexture(url: url, device: device)
+                        loaded = try video.frame(at: Double(time), clamp: true, commandBuffer: commandBuffer)
+                        videoTextures[url] = video
+                    } else {
+                        loaded = try AnimatedImageTexture(url: url).frame(at: Double(time), device: device)
+                    }
+                    textures[name] = loaded
+                    return loaded
+                } catch {
+                    failedUserTextures.insert(name)
+                    throw error
+                }
+            }
             let t = try TextureLoader.load(name, locator: locator, device: device,
                                            videos: &videoTextures, time: Double(time), commandBuffer: commandBuffer)
             textures[name] = t

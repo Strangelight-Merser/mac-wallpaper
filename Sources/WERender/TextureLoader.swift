@@ -14,6 +14,7 @@ public struct LoadedTexture {
     /// WE `FORMAT_*` code (common_fragment.h) shaders see as `TEX<n>FORMAT`: 0 RGBA8888, 4 DXT5,
     /// 6 DXT3, 7 DXT1, 8 RG88, 9 R8, 10 RG1616F, 11 R16F.
     public var formatCode: Int = 0
+    var animation: AnimatedImageTexture? = nil
     var video: VideoTexture? = nil
     var videoFrame: VideoTextureFrame? = nil
 }
@@ -90,6 +91,10 @@ enum TextureLoader {
     static func decodeImage(_ bytes: [UInt8]) throws -> ([UInt8], Int, Int) {
         guard let src = CGImageSourceCreateWithData(Data(bytes) as CFData, nil),
               let img = CGImageSourceCreateImageAtIndex(src, 0, nil) else { throw WEFormatError.corrupt("embedded image") }
+        return try decodeImage(img)
+    }
+
+    static func decodeImage(_ img: CGImage) throws -> ([UInt8], Int, Int) {
         let w = img.width, h = img.height
         var px = [UInt8](repeating: 0, count: w * h * 4)
         guard let ctx = CGContext(data: &px, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
