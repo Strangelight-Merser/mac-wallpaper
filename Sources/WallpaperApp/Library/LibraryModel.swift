@@ -119,6 +119,7 @@ final class LibraryModel {
         let roots = self.roots, assets = self.assets
         _ = await library.refresh(roots: roots, assets: assets, deep: false)
         entries = await library.entries()
+        propertyCache = [:]  // project.json files may have changed (updates)
         isRefreshing = false
         isCheckingDeep = true
         _ = await library.refresh(roots: roots, assets: assets, deep: true)
@@ -169,16 +170,19 @@ final class LibraryModel {
     // MARK: - properties
 
     func properties(for entry: WallpaperEntry) -> [WallpaperProperty] {
-        if let cached = propertyCache[entry.id] { return cached }
-        // A preset shows its base's settings, starting from the preset's values.
-        let url = (entry.preset?.baseFolder ?? entry.folder).appendingPathComponent("project.json")
+        // A preset shows its base's settings, starting from the preset's values. Keyed by the folder read too:
+        // a preset found before its base (at launch) has none yet.
+        let folder = entry.preset?.baseFolder ?? entry.folder
+        let key = entry.id + "|" + folder.path
+        if let cached = propertyCache[key] { return cached }
+        let url = folder.appendingPathComponent("project.json")
         let project = (try? JSONSerialization.jsonObject(with: Data(contentsOf: url))) as? [String: Any] ?? [:]
         var parsed = WallpaperProperties.parse(project: project)
         if entry.preset != nil {
             let preset = WallpaperProperties.presetValues(folder: entry.folder)
             parsed = parsed.map { p in preset[p.id].map { p.withDefault($0) } ?? p }
         }
-        propertyCache[entry.id] = parsed
+        propertyCache[key] = parsed
         return parsed
     }
 

@@ -99,9 +99,14 @@ final class WorkshopBrowseModel {
     /// Subscribes on Steam (as WE does) and downloads it; the button showed the size. A preset brings its base
     /// wallpaper along, as WE does with required items.
     func subscribe(_ item: WorkshopItem) {
-        let items = [base(of: item), item].compactMap { $0 }
         Task {
             do {
+                var base = base(of: item)
+                if base == nil, item.kind == .preset, let id = item.children?.first {
+                    base = try await SteamWorkshop().details([id]).first { $0.result == 1 }
+                    bases[id] = base
+                }
+                let items = [base, item].compactMap { $0 }
                 try await steam.connection.run { client, _ in
                     for item in items { try await WorkshopBrowser(client: client).subscribe(item.id) }
                 }
