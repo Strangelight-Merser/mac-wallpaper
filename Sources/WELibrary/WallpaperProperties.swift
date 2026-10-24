@@ -33,8 +33,9 @@ public enum WallpaperProperties {
         }
         return value as? String
     }
-    public static func parse(project: [String: Any]) -> [WallpaperProperty] {
+    public static func parse(project: [String: Any], languages: [String] = Locale.preferredLanguages) -> [WallpaperProperty] {
         let entries = (project["general"] as? [String: Any])?["properties"] as? [String: Any] ?? [:]
+        let strings = localization(project, languages: languages)
         var indices: [String: Int] = [:]
         return entries.compactMap { key, raw -> WallpaperProperty? in
             guard let p = raw as? [String: Any] else { return nil }
@@ -64,11 +65,32 @@ public enum WallpaperProperties {
             if case .slider = kind, let v = value, let n = Double(v) { value = NSNumber(value: n).stringValue }
             if kind == .label || kind == .group { value = nil }
             indices[key] = number("index").map(Int.init) ?? 0
-            return WallpaperProperty(id: key, kind: kind, label: p["text"] as? String ?? key,
+            let text = p["text"] as? String ?? key
+            return WallpaperProperty(id: key, kind: kind, label: strings[text] ?? text,
                                      order: number("order").map(Int.init) ?? 0, defaultValue: value,
                                      condition: p["condition"] as? String)
         }.sorted { ($0.order, indices[$0.id] ?? 0, $0.id) < ($1.order, indices[$1.id] ?? 0, $1.id) }
     }
+    /// The project's own translations (`localization`: WE language codes such as `en-us`, `zh-chs`, each mapping
+    /// label keys to text) for the first preferred language it has, falling back to English.
+    static func localization(_ project: [String: Any], languages: [String]) -> [String: String] {
+        guard let tables = project["localization"] as? [String: Any] else { return [:] }
+        func code(_ language: String) -> [String] {
+            let l = language.lowercased()
+            if l.hasPrefix("zh") {
+                return l.contains("hant") || l.hasSuffix("-tw") || l.hasSuffix("-hk") ? ["zh-cht", "zh-tw"] : ["zh-chs", "zh-cn"]
+            }
+            let base = String(l.split(separator: "-").first ?? "")
+            return [l, base == "en" ? "en-us" : base, base]
+        }
+        for candidate in languages.flatMap(code) + ["en-us", "en"] {
+            if let table = tables.first(where: { $0.key.lowercased() == candidate })?.value as? [String: Any] {
+                return table.compactMapValues { $0 as? String }
+            }
+        }
+        return [:]
+    }
+
     /// A preset's values (`project.json` → `preset`). Paths to files in the preset's folder become absolute,
     /// since the base wallpaper plays from its own folder.
     public static func presetValues(folder: URL) -> [String: String] {

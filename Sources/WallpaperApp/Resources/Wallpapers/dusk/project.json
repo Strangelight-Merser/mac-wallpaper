@@ -1,0 +1,82 @@
+{
+	"title": "Dusk",
+	"description": "Hills drift under a dusk sky and follow the pointer; the sun breathes with your music. Comes with MacWallpaper.",
+	"type": "web",
+	"file": "index.html",
+	"preview": "preview.jpg",
+	"contentrating": "Everyone",
+	"tags": [
+		"Nature"
+	],
+	"general": {
+		"supportsaudioprocessing": true,
+		"properties": {
+			"skytop": {
+				"order": 0,
+				"text": "ui_dusk_sky",
+				"type": "color",
+				"value": "0.07 0.05 0.23"
+			},
+			"skyhorizon": {
+				"order": 1,
+				"text": "ui_dusk_horizon",
+				"type": "color",
+				"value": "1.0 0.6 0.38"
+			},
+			"hillcolor": {
+				"order": 2,
+				"text": "ui_dusk_hills",
+				"type": "color",
+				"value": "0.42 0.18 0.53"
+			},
+			"speed": {
+				"order": 3,
+				"text": "ui_dusk_speed",
+				"type": "slider",
+				"min": 0,
+				"max": 3,
+				"step": 0.1,
+				"precision": 1,
+				"value": 1
+			},
+			"stars": {
+				"order": 4,
+				"text": "ui_dusk_stars",
+				"type": "bool",
+				"value": true
+			},
+			"parallax": {
+				"order": 5,
+				"text": "ui_dusk_parallax",
+				"type": "bool",
+				"value": true
+			},
+			"audioresponse": {
+				"order": 6,
+				"text": "ui_dusk_audio",
+				"type": "bool",
+				"value": true
+			}
+		}
+	},
+	"localization": {
+		"en-us": {
+			"ui_dusk_sky": "Sky",
+			"ui_dusk_horizon": "Horizon",
+			"ui_dusk_hills": "Hills",
+			"ui_dusk_speed": "Speed",
+			"ui_dusk_stars": "Stars",
+			"ui_dusk_parallax": "Follow the Pointer",
+			"ui_dusk_audio": "React to Music"
+		},
+		"zh-chs": {
+			"ui_dusk_sky": "天空",
+			"ui_dusk_horizon": "地平线",
+			"ui_dusk_hills": "山丘",
+			"ui_dusk_speed": "速度",
+			"ui_dusk_stars": "星星",
+			"ui_dusk_parallax": "跟随指针",
+			"ui_dusk_audio": "随音乐律动"
+		}
+	}
+}

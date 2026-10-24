@@ -1,0 +1,166 @@
+<!doctype html>
+<!-- "Dusk", the wallpaper that comes with MacWallpaper (GPL-3.0, like the app). A web wallpaper using Wallpaper
+     Engine's JavaScript API: user properties, pause, audio. Hills drift and follow the pointer; the sun breathes
+     with the music. -->
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #120c3a; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+'use strict';
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+// Settings (user properties in project.json).
+const settings = {
+  skyTop: [0.07, 0.05, 0.23], skyHorizon: [1.0, 0.6, 0.38], hills: [0.42, 0.18, 0.53],
+  speed: 1, stars: true, audio: true, parallax: true,
+};
+let paused = false;
+
+// Audio: 128 values, 64 per channel, low to high frequencies.
+let bass = 0, treble = 0;
+function onAudio(values) {
+  if (!settings.audio) { bass = treble = 0; return; }
+  let low = 0, high = 0;
+  for (let i = 0; i < 8; i++) low += values[i] + values[64 + i];
+  for (let i = 24; i < 64; i++) high += values[i] + values[64 + i];
+  bass = Math.max(bass * 0.85, Math.min(1, low / 16));
+  treble = Math.max(treble * 0.9, Math.min(1, high / 80 * 3));
+}
+if (window.wallpaperRegisterAudioListener) window.wallpaperRegisterAudioListener(onAudio);
+
+function rgb(c, a = 1) { return `rgba(${c.map(v => Math.round(v * 255)).join(',')},${a})`; }
+function mixColor(a, b, t) { return a.map((v, i) => v + (b[i] - v) * t); }
+function parseColor(s) { return s.split(' ').map(Number).slice(0, 3); }
+
+window.wallpaperPropertyListener = {
+  applyUserProperties(p) {
+    if (p.skytop) settings.skyTop = parseColor(p.skytop.value);
+    if (p.skyhorizon) settings.skyHorizon = parseColor(p.skyhorizon.value);
+    if (p.hillcolor) settings.hills = parseColor(p.hillcolor.value);
+    if (p.speed) settings.speed = Number(p.speed.value);
+    if (p.stars) settings.stars = p.stars.value === true || p.stars.value === 'true';
+    if (p.audioresponse) settings.audio = p.audioresponse.value === true || p.audioresponse.value === 'true';
+    if (p.parallax) settings.parallax = p.parallax.value === true || p.parallax.value === 'true';
+  },
+  setPaused(value) {
+    paused = value;
+    if (!paused) { last = performance.now(); requestAnimationFrame(frame); }
+  },
+};
+
+// Pointer: hills lean toward it (parallax), eased.
+let pointer = { x: 0.5, y: 0.5 }, eased = { x: 0.5, y: 0.5 };
+addEventListener('mousemove', e => { pointer = { x: e.clientX / innerWidth, y: e.clientY / innerHeight }; });
+
+let width = 0, height = 0, scale = 1;
+function resize() {
+  scale = Math.min(devicePixelRatio || 1, 2);
+  width = innerWidth; height = innerHeight;
+  canvas.width = Math.round(width * scale); canvas.height = Math.round(height * scale);
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+}
+addEventListener('resize', resize);
+resize();
+
+// Stars: fixed positions (seeded), each with its own twinkle.
+function seeded(seed) { return () => (seed = (seed * 16807) % 2147483647) / 2147483647; }
+const random = seeded(7);
+const stars = Array.from({ length: 140 }, () => ({
+  x: random(), y: random() * 0.55, r: 0.4 + random() * 1.3, phase: random() * Math.PI * 2, rate: 0.5 + random() * 1.5,
+}));
+
+// Hills: sums of slow sines, far to near.
+const layers = [
+  { base: 0.56, amp: 0.045, freq: [1.3, 2.9, 5.1], drift: 0.004, depth: 0.012, shade: 0.75 },
+  { base: 0.69, amp: 0.040, freq: [1.7, 3.7, 6.3], drift: 0.008, depth: 0.026, shade: 0.45 },
+  { base: 0.82, amp: 0.035, freq: [2.1, 4.3, 7.9], drift: 0.014, depth: 0.045, shade: 0.18 },
+];
+function ridgeY(layer, x, t) {
+  const [a, b, c] = layer.freq;
+  return layer.base - layer.amp * (Math.sin(x * a + t * layer.drift * 6) * 0.6
+    + Math.sin(x * b - t * layer.drift * 4 + 1.7) * 0.3 + Math.sin(x * c + t * layer.drift * 9 + 4.1) * 0.1);
+}
+
+let shooting = null, nextShooting = 6, last = performance.now(), time = 0;
+function frame(now) {
+  if (paused) return;
+  const dt = Math.min(0.1, (now - last) / 1000); last = now;
+  time += dt * settings.speed;
+  const target = settings.parallax ? pointer : { x: 0.5, y: 0.5 };
+  eased.x += (target.x - eased.x) * Math.min(1, dt * 2.5);
+  eased.y += (target.y - eased.y) * Math.min(1, dt * 2.5);
+
+  // Sky.
+  const sky = ctx.createLinearGradient(0, 0, 0, height * 0.8);
+  sky.addColorStop(0, rgb(settings.skyTop));
+  sky.addColorStop(0.5, rgb(mixColor(settings.skyTop, [0.23, 0.12, 0.48], 0.8)));
+  sky.addColorStop(0.82, rgb(mixColor(settings.skyHorizon, [0.7, 0.27, 0.5], 0.5)));
+  sky.addColorStop(1, rgb(settings.skyHorizon));
+  ctx.fillStyle = sky; ctx.fillRect(0, 0, width, height);
+
+  // Stars twinkle, a little brighter with high notes.
+  if (settings.stars) {
+    for (const s of stars) {
+      const a = (0.35 + 0.35 * Math.sin(time * s.rate + s.phase) + treble * 0.4) * (1 - s.y * 1.2);
+      if (a <= 0) continue;
+      ctx.fillStyle = `rgba(255,255,255,${Math.min(1, a)})`;
+      ctx.beginPath(); ctx.arc(s.x * width, s.y * height, s.r, 0, Math.PI * 2); ctx.fill();
+    }
+    nextShooting -= dt;
+    if (!shooting && nextShooting <= 0) {
+      shooting = { x: 0.2 + random() * 0.6, y: 0.05 + random() * 0.2, life: 0 };
+      nextShooting = 8 + random() * 14;
+    }
+    if (shooting) {
+      shooting.life += dt;
+      const p = shooting.life / 0.9, x = (shooting.x + p * 0.25) * width, y = (shooting.y + p * 0.12) * height;
+      const trail = ctx.createLinearGradient(x, y, x - 0.08 * width, y - 0.04 * height);
+      trail.addColorStop(0, `rgba(255,255,255,${0.9 * (1 - p)})`); trail.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.strokeStyle = trail; ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - 0.08 * width, y - 0.04 * height); ctx.stroke();
+      if (p >= 1) shooting = null;
+    }
+  }
+
+  // Sun: glow and disc, breathing with the bass.
+  const sunX = width * (0.62 - (eased.x - 0.5) * 0.01), sunY = height * 0.6;
+  const radius = Math.min(width, height) * (0.11 + bass * 0.012);
+  const glow = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, radius * (3.2 + bass * 0.8));
+  glow.addColorStop(0, `rgba(255,226,176,${0.75 + bass * 0.2})`);
+  glow.addColorStop(0.35, 'rgba(255,154,98,0.32)');
+  glow.addColorStop(1, 'rgba(255,154,98,0)');
+  ctx.fillStyle = glow; ctx.fillRect(0, 0, width, height);
+  const disc = ctx.createLinearGradient(0, sunY - radius, 0, sunY + radius);
+  disc.addColorStop(0, '#fff4d6'); disc.addColorStop(1, '#ffc27a');
+  ctx.fillStyle = disc; ctx.beginPath(); ctx.arc(sunX, sunY, radius, 0, Math.PI * 2); ctx.fill();
+
+  // Hills, far to near; nearer layers move more with the pointer.
+  for (const layer of layers) {
+    const dx = -(eased.x - 0.5) * layer.depth, dy = -(eased.y - 0.5) * layer.depth * 0.5;
+    const color = mixColor(settings.hills, [0.07, 0.04, 0.18], 1 - layer.shade);
+    const top = mixColor(color, settings.skyHorizon, 0.12 * layer.shade);
+    const fill = ctx.createLinearGradient(0, height * (layer.base - layer.amp), 0, height);
+    fill.addColorStop(0, rgb(top)); fill.addColorStop(1, rgb(mixColor(color, [0.05, 0.03, 0.12], 0.5)));
+    ctx.fillStyle = fill;
+    ctx.beginPath(); ctx.moveTo(-10, height + 10);
+    for (let i = 0; i <= 96; i++) {
+      const u = i / 96;
+      ctx.lineTo(u * (width + 20) - 10, (ridgeY(layer, u * 6 + dx * 6, time) + dy) * height);
+    }
+    ctx.lineTo(width + 10, height + 10); ctx.closePath(); ctx.fill();
+  }
+  requestAnimationFrame(frame);
+}
+// First frame right away (hidden or offscreen views may not run animation frames yet).
+frame(performance.now());
+</script>
+</body>
+</html>

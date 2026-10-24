@@ -11,6 +11,7 @@ enum LibrarySection: Hashable {
     /// Browsing the Steam Workshop (not the local library).
     case workshopBrowse
     case downloads
+    case bundled
     case folder(URL)
 }
 
@@ -62,11 +63,18 @@ final class LibraryModel {
     var showAssets: () -> Void = {}
 
     var roots: [LibraryRoot] {
-        LibraryRoots.steamWorkshopRoots() + [LibraryRoots.downloads]
+        LibraryRoots.steamWorkshopRoots() + [LibraryRoots.downloads] + Self.bundledRoot
             + folders.map { LibraryRoot(url: $0, kind: .userFolder) }
     }
 
     var selected: WallpaperEntry? { entries.first { $0.id == selection } }
+
+    /// Wallpapers that come with the app (e.g. "Dusk"), so there is something to show before logging in.
+    static var bundledRoot: [LibraryRoot] {
+        guard let url = Bundle.main.resourceURL?.appendingPathComponent("Wallpapers"),
+              FileManager.default.fileExists(atPath: url.path) else { return [] }
+        return [LibraryRoot(url: url, kind: .bundled)]
+    }
 
     /// Entries for the current section, search, filters and sort order.
     var visible: [WallpaperEntry] {
@@ -97,6 +105,7 @@ final class LibraryModel {
             case .type(let t): guard e.type == t else { return false }
             case .steamWorkshop: guard e.root == .steamWorkshop else { return false }
             case .downloads: guard e.root == .downloads else { return false }
+            case .bundled: guard e.root == .bundled else { return false }
             case .folder(let url): guard e.folder.path.hasPrefix(url.path + "/") else { return false }
             case .workshopBrowse: return false
             }

@@ -162,6 +162,7 @@ private struct Sidebar: View {
             Section {
                 row(.steamWorkshop, Text("Steam Workshop"), "cloud")
                 row(.downloads, Text("Downloaded"), "arrow.down.circle")
+                if model.count(.bundled) > 0 { row(.bundled, Text("Included"), "gift") }
                 ForEach(model.folders, id: \.self) { url in
                     row(.folder(url), Text(url.lastPathComponent), "folder")
                         .contextMenu {

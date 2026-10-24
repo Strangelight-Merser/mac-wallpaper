@@ -12,9 +12,16 @@ BIN=$(swift build -c release --show-bin-path)
 APP=.build/MacWallpaper.app
 mkdir -p $APP/Contents/MacOS
 cp $BIN/WallpaperApp $APP/Contents/MacOS/MacWallpaper
-# Translations (Localizable.strings per language) go into the bundle's Resources.
+# Resources: translations (Localizable.strings per language), the bundled wallpapers, the icon and the
+# license texts the app must carry (GPL-3.0 and its third-party components).
 mkdir -p $APP/Contents/Resources
-rsync -a --delete --include '*/' --include '*.strings' --exclude '*' Sources/WallpaperApp/Resources/ $APP/Contents/Resources/
+rsync -a --delete Sources/WallpaperApp/Resources/ $APP/Contents/Resources/
+cp packaging/AppIcon.icns $APP/Contents/Resources/AppIcon.icns
+mkdir -p $APP/Contents/Resources/Licenses
+cp LICENSE THIRD_PARTY_NOTICES.md $APP/Contents/Resources/Licenses/
+cp ThirdParty/glslang/LICENSE.txt $APP/Contents/Resources/Licenses/glslang-LICENSE.txt
+cp ThirdParty/SPIRV-Cross/LICENSE $APP/Contents/Resources/Licenses/SPIRV-Cross-LICENSE.txt
+cp ThirdParty/zstd/LICENSE $APP/Contents/Resources/Licenses/zstd-LICENSE.txt
 cat > $APP/Contents/Info.plist <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -22,6 +29,7 @@ cat > $APP/Contents/Info.plist <<PLIST
   <key>CFBundleIdentifier</key><string>dev.macwallpaper.app</string>
   <key>CFBundleName</key><string>MacWallpaper</string>
   <key>CFBundleExecutable</key><string>MacWallpaper</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleDevelopmentRegion</key><string>en</string>
   <key>CFBundleLocalizations</key><array><string>en</string><string>zh-Hans</string></array>

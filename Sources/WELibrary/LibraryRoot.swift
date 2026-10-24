@@ -3,7 +3,8 @@ import WEFormat
 
 /// A directory to search for wallpaper projects.
 public struct LibraryRoot: Codable, Sendable, Hashable {
-    public enum Kind: String, Codable, Sendable { case steamWorkshop, downloads, userFolder }
+    /// `bundled`: wallpapers that come with the app (its Resources/Wallpapers).
+    public enum Kind: String, Codable, Sendable { case steamWorkshop, downloads, userFolder, bundled }
     public var url: URL
     public var kind: Kind
 

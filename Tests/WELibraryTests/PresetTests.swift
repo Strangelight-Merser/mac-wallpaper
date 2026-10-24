@@ -99,4 +99,20 @@ final class PresetTests: LibraryTestCase {
         XCTAssertEqual(parsed.first?.withDefault("/a.png").defaultValue, "/a.png")
         XCTAssertEqual(parsed.first?.withDefault("/a.png").label, "Picture")
     }
+    func testProjectLocalization() {
+        let project: [String: Any] = [
+            "general": ["properties": ["sky": ["type": "color", "text": "ui_sky", "value": "0 0 0"],
+                                       "plain": ["type": "bool", "text": "Plain text", "value": true]]],
+            "localization": ["en-us": ["ui_sky": "Sky"], "zh-chs": ["ui_sky": "天空"]],
+        ]
+        func label(_ languages: [String]) -> String? {
+            WallpaperProperties.parse(project: project, languages: languages).first { $0.id == "sky" }?.label
+        }
+        XCTAssertEqual(label(["zh-Hans-CN"]), "天空")
+        XCTAssertEqual(label(["en-GB"]), "Sky")
+        XCTAssertEqual(label(["fr-FR"]), "Sky")  // falls back to English
+        XCTAssertEqual(WallpaperProperties.parse(project: project, languages: ["zh-Hans"]).first { $0.id == "plain" }?.label, "Plain text")
+        XCTAssertEqual(WallpaperProperties.parse(project: ["general": project["general"]!], languages: ["zh-Hans"])
+            .first { $0.id == "sky" }?.label, "ui_sky")
+    }
 }

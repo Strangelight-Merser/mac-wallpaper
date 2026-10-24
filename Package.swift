@@ -109,7 +109,7 @@ let package = Package(
         .executableTarget(name: "WallpaperApp", dependencies: ["WERender", "WEWeb", "WEAudio", "WELibrary", "WESteam"],
                           exclude: ["Resources"]),
         // Compiles .metal files through MTLDevice.makeLibrary (used by scripts/shader_batch.py).
-        .executableTarget(name: "metalcheck", path: "tools", sources: ["metalcheck.swift"]),
+        .executableTarget(name: "metalcheck", path: "tools", exclude: ["make-icon.swift"], sources: ["metalcheck.swift"]),
     ],
     cxxLanguageStandard: .cxx17
 )
