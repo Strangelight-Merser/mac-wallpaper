@@ -169,4 +169,50 @@ public actor WorkshopProbe {
         }
         return WorkshopProbeResult(names: names, jsonFiles: json, packageHeadersComplete: complete, notes: notes)
     }
+
+    /// Files inside a workshop item's scene.pkg, read by peeking only at the chunks that hold them (the first chunk
+    /// for the table, then the one holding each file, up to the file's end). Files spanning two chunks are skipped.
+    /// Returns the files found and the bytes read.
+    public func packageFiles(_ plan: DownloadPlan, matching: @Sendable (String) -> Bool)
+        async throws -> (files: [String: Data], bytesRead: Int, notes: [String]) {
+        guard let package = plan.manifest.files.first(where: { $0.path.lowercased().hasSuffix("scene.pkg") }) else {
+            return ([:], 0, ["no scene.pkg"])
+        }
+        let chunks = package.chunks.sorted { $0.offset < $1.offset }
+        guard let first = chunks.first else { return ([:], 0, ["empty scene.pkg"]) }
+        var read = 0, notes: [String] = [], files: [String: Data] = [:]
+        let head = try await peekChunk(plan, first, until: 64 * 1024, read: &read)
+        guard let table = try WorkshopPackageHeader.entries(in: head, fileSize: package.size) else {
+            return ([:], read, ["package table not in the first 64 KB"])
+        }
+        for entry in table.entries where matching(entry.name) {
+            let start = UInt64(table.payloadStart) + entry.offset, end = start + entry.size
+            guard let chunk = chunks.last(where: { $0.offset <= start }),
+                  end <= chunk.offset + UInt64(chunk.originalSize) else {
+                notes.append("\(entry.name): spans chunks; skipped"); continue
+            }
+            let plain = chunk.offset == first.offset && head.count >= Int(end) ? head
+                : try await peekChunk(plan, chunk, until: Int(end - chunk.offset), read: &read)
+            guard plain.count >= Int(end - chunk.offset) else { notes.append("\(entry.name): incomplete"); continue }
+            files[entry.name] = plain.subdata(in: Int(start - chunk.offset)..<Int(end - chunk.offset))
+        }
+        return (files, read, notes)
+    }
+
+    /// The plaintext of a chunk from its start until `until` bytes (or its end); counts the bytes read.
+    private func peekChunk(_ plan: DownloadPlan, _ chunk: ContentManifest.Chunk, until: Int, read: inout Int) async throws -> Data {
+        let cap = Int(min(Int64(chunk.compressedSize) + 4096, maxBytes - reservedBytes))
+        guard cap > 0 else { throw SteamError.tooLarge(maxBytes) }
+        for server in plan.servers {
+            do {
+                let result = try await peek(server, plan.manifest.depotID, chunk.sha, plan.key, { $0.count >= until }, cap)
+                read += result.bytesRead; reservedBytes += Int64(result.bytesRead)
+                return result.plaintext
+            } catch let failure as ChunkPeekFailure {
+                read += failure.bytesRead; reservedBytes += Int64(failure.bytesRead)
+                if !failure.retryable { throw failure.underlying }
+            }
+        }
+        throw SteamError.transport
+    }
 }

@@ -843,12 +843,12 @@ func libraryCommand(_ arguments: [String]) async throws {
 
 
 func workshopCommand(_ arguments: [String]) async throws {
-    let help = "wecli workshop query [--sort trend|popular|recent|updated|subscribed|relevance] [--search text] [--tag tag] [--exclude tag] [--page-size N] [--cursor cursor] [--json] | subscribe ID | unsubscribe ID | survey [--top N] [--sort trend|popular] [--pkg-headers] [--max-mb N] [--plan] [--json]"
-    guard let command = arguments.first, ["query", "subscribe", "unsubscribe", "survey"].contains(command) else {
+    let help = "wecli workshop query [--sort trend|popular|recent|updated|subscribed|relevance] [--search text] [--tag tag] [--exclude tag] [--page-size N] [--cursor cursor] [--json] | subscribe ID | unsubscribe ID | survey [--top N] [--sort trend|popular] [--pkg-headers] [--max-mb N] [--plan] [--json] | pkgfile ID SUFFIX [--max-mb N] [--out DIR]"
+    guard let command = arguments.first, ["query", "subscribe", "unsubscribe", "survey", "pkgfile"].contains(command) else {
         throw SteamError.malformed(help)
     }
     var options: [String: String] = [:], flags = Set<String>(), tags: [String] = [], excluded: [String] = [], ids: [String] = []
-    let allowed: Set<String> = command == "query" ? ["--sort", "--search", "--tag", "--exclude", "--page-size", "--cursor"] : command == "survey" ? ["--top", "--sort", "--max-mb"] : []
+    let allowed: Set<String> = command == "query" ? ["--sort", "--search", "--tag", "--exclude", "--page-size", "--cursor"] : command == "survey" ? ["--top", "--sort", "--max-mb"] : command == "pkgfile" ? ["--max-mb", "--out"] : []
     let switches: Set<String> = command == "query" ? ["--json"] : command == "survey" ? ["--json", "--pkg-headers", "--plan"] : []
     var i = 1
     while i < arguments.count {
@@ -865,7 +865,10 @@ func workshopCommand(_ arguments: [String]) async throws {
         i += 1
     }
     let mutation = command == "subscribe" || command == "unsubscribe"
-    guard mutation ? (ids.count == 1 && UInt64(ids[0]) != nil && UInt64(ids[0]) != 0) : ids.isEmpty else { throw SteamError.malformed(help) }
+    let validID = !ids.isEmpty && UInt64(ids[0]) != nil && UInt64(ids[0]) != 0
+    guard mutation ? (ids.count == 1 && validID) : command == "pkgfile" ? (ids.count == 2 && validID) : ids.isEmpty else {
+        throw SteamError.malformed(help)
+    }
     let sort: WorkshopQuery.Sort
     switch options["--sort"] ?? "trend" {
     case "trend": sort = .trend(days: 7)
@@ -891,7 +894,27 @@ func workshopCommand(_ arguments: [String]) async throws {
         try await client.connect()
         var session = try await client.logOn(tokens)
         let browser = WorkshopBrowser(client: client)
-        if mutation {
+        if command == "pkgfile" {
+            // Small files inside a package (e.g. a puppet's .mdl) without downloading the package.
+            guard let item = try await SteamWorkshop().details([UInt64(ids[0])!]).first, item.result == 1 else {
+                throw SteamError.malformed("workshop item not found")
+            }
+            let plan = try await WorkshopDownloader(client: client, session: session).plan(item)
+            let suffix = ids[1].lowercased()
+            let probe = WorkshopProbe(maxBytes: Int64(mb * 1048576))
+            let result = try await probe.packageFiles(plan) { $0.lowercased().hasSuffix(suffix) }
+            for (name, data) in result.files.sorted(by: { $0.key < $1.key }) {
+                print("\(name)\t\(data.count) bytes")
+                if let out = options["--out"] {
+                    let url = URL(fileURLWithPath: out).appendingPathComponent(String(ids[0]))
+                        .appendingPathComponent(URL(fileURLWithPath: name).lastPathComponent)
+                    try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+                    try data.write(to: url)
+                }
+            }
+            for note in result.notes { print("note: \(note)") }
+            print("read \(result.bytesRead) bytes")
+        } else if mutation {
             let id = UInt64(ids[0])!
             if command == "subscribe" { try await browser.subscribe(id) } else { try await browser.unsubscribe(id) }
             print("\(command): \(id)")
