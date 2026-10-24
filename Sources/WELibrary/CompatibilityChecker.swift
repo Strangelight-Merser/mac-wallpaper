@@ -29,7 +29,7 @@ public struct Compatibility: Codable, Sendable, Equatable {
 
 /// Checks local assets and unsupported features without needing a GPU for static checks.
 public struct CompatibilityChecker: Sendable {
-    public static let version = 9
+    public static let version = 10
     private let assets: URL?
 
     public init(assets: URL?) { self.assets = assets }
@@ -102,6 +102,7 @@ public struct CompatibilityChecker: Sendable {
         func add(_ feature: Feature) { result.missing[feature, default: 0] += 1 }
         // Scripts run; only the parts they use that are not supported yet show up (deep check warnings).
         for case let object as [String: Any] in raw["objects"] as? [Any] ?? [] {
+            if SceneLight.Kind(rawValue: props.resolve(object["light"]) as? String ?? "") != nil || props.resolve(object["shape"]) as? String == "quad" { continue }
             if object["particle"] != nil || object["text"] != nil || object["sound"] != nil { continue }
             guard let image = object["image"] as? String else {
                 let kinds: [(String, Feature)] = [("model", .model3D), ("light", .light)]
@@ -138,7 +139,7 @@ public struct CompatibilityChecker: Sendable {
             return result
         }
         result.notes += scene.notes
-        var renderable = 0
+        var renderable = scene.lights.contains { $0.castVolumetrics } ? 1 : 0
         var checkedVideos: [String: String] = [:]
         func checkPasses(_ passes: [SceneDescription.Pass]) -> Set<Feature> {
             var features = Set<Feature>()

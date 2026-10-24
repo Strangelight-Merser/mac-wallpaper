@@ -146,6 +146,7 @@ public final class SceneRenderer: WallpaperRenderer {
 
     lazy var white = solid([255, 255, 255, 255])
     lazy var black = solid([0, 0, 0, 255])
+    lazy var transparent = solid([0, 0, 0, 0])
 
     static let vertexBufferIndex = 30
 
@@ -221,6 +222,7 @@ public final class SceneRenderer: WallpaperRenderer {
         // (scripts may change the text); unchanged text is not laid out twice.
         updateTextLayers()
         runScripts(projection: projection)
+        updateLights()
         updateTextLayers()
         let c = scene.clearColor
         _ = encoder(for: sceneTarget, clear: MTLClearColor(red: Double(c.x), green: Double(c.y), blue: Double(c.z), alpha: 1))
@@ -246,6 +248,9 @@ public final class SceneRenderer: WallpaperRenderer {
                 do { try renderParticle(i, projection: projection, slot: particleSlot) }
                 catch { warn("\(scene.particles[i].name): \(error)") }
             }
+        }
+        if enableApproximateVolumetrics {
+            do { try renderVolumetrics(projection: projection) } catch { warn("volumetrics: \(error)") }
         }
         if scene.bloom.enabled && !disableBloom {
             do { try renderBloom() } catch { warn("bloom: \(error)") }
@@ -313,6 +318,7 @@ public final class SceneRenderer: WallpaperRenderer {
             guard let combos = try? effectiveCombos(pass),
                   SceneDescription.conditionsHold(pass.conditions, combos: combos) else { return nil }
             var p = pass
+            if layer.isShape, combos["DIRECTDRAW"] == 1 { p.blending = "additivepremultiplied" }
             for (slot, c) in pass.bindConditions where !SceneDescription.conditionsHold(c, combos: combos) {
                 p.binds[slot] = nil
             }
@@ -326,6 +332,7 @@ public final class SceneRenderer: WallpaperRenderer {
                 passes.append(p)
             }
         }
+        if layer.isShape { return passes }
         if passes.count > 1 {
             passes[passes.count - 1].blending = passes[0].blending
             passes[0].blending = "normal"
@@ -428,6 +435,7 @@ public final class SceneRenderer: WallpaperRenderer {
         var c = shaderDefaultCombos[pass.shader]!
         for (k, v) in pass.effectCombos { c[k] = v }
         for (k, v) in pass.combos { c[k.uppercased()] = v }
+        c.merge(scene.lightCombos) { _, new in new }
         return c
     }
 
@@ -515,7 +523,9 @@ public final class SceneRenderer: WallpaperRenderer {
             let mesh = i == passes.count - 1 ? puppet : nil
             let key = "L\(index).\(kept[i].offset)|\(pass.blending)" + (mesh == nil ? "" : "|puppet")
             return pass.copy != nil ? nil : try self.plan(key, pass: pass, layer: layer, model: model,
-                                                        hasPrevious: i > 0, refreshUniforms: refresh,
+                                                        hasPrevious: i > 0,
+                                                        fixedTextures: layer.isShape && i == 0 && (pass.textures.first ?? nil) == nil ? [0: transparent] : [:],
+                                                        refreshUniforms: refresh,
                                                         puppet: mesh, animationLayers: layer.animationLayers)
         }
         // Effect FBOs visible to a pass (layer composites are looked up globally).
@@ -538,7 +548,7 @@ public final class SceneRenderer: WallpaperRenderer {
         // whose output never changes are rendered once into a dedicated texture.
         let lastDrawingPass = passes.lastIndex { $0.copy == nil } ?? passes.count - 1
         var staticPrefix = 0
-        if !disableLayerCache, !scriptedLayers.contains(index) {
+        if !disableLayerCache, !scriptedLayers.contains(index), !layer.isShape {
             while staticPrefix < lastDrawingPass, let p = plans[staticPrefix], !p.isDynamic,
                   passes[staticPrefix].target == nil, passes[staticPrefix].binds.isEmpty {
                 staticPrefix += 1
@@ -587,6 +597,14 @@ public final class SceneRenderer: WallpaperRenderer {
             }
             guard let plan = plans[i] else { continue }
 
+            if layer.isShape, (try effectiveCombos(pass))["DIRECTDRAW"] == 1, pass.target == nil {
+                if toScene {
+                    try execute(plan, previous: nil, target: sceneTarget, clear: false,
+                                mvp: projection * model, half: size / 2, first: false)
+                    fullFrameValid = false
+                }
+                continue
+            }
             if let targetName = pass.target {
                 if sequenceInput == nil { sequenceInput = input }
                 let target = try resolveTexture(targetName)
@@ -664,6 +682,8 @@ public final class SceneRenderer: WallpaperRenderer {
             case pointer, pointerLast, pointerState, parallaxPosition, effectProjection, effectProjectionInverse
             case audio(bands: Int, right: Bool)
             case particle(String)
+            case light(String, Int, Int?, Bool)
+            case litMatrix(String, Int?)
             case bones, bonesAlpha
         }
         struct UniformPlan {
@@ -699,14 +719,23 @@ public final class SceneRenderer: WallpaperRenderer {
     }
 
     var plans: [String: PassPlan] = [:]
+    var frameLights: [FrameLight] = []
+    var volumetricPipeline: MTLRenderPipelineState?
+    public var enableApproximateVolumetrics = true
 
     /// Uniform buffer template for a stage: static values written, per-frame values recorded as patches.
     func uniformPlan(_ stage: CompiledStage, program: Program, ctx: DrawContext, particle: Bool) -> PassPlan.UniformPlan? {
         guard let index = stage.uniformBufferIndex else { return nil }
         var buf = [UInt8](repeating: 0, count: max(stage.uniformBlockSize, 16))
         var patches: [(patch: PassPlan.Patch, offset: Int, type: String, stride: Int)] = []
+        let lighting = ((try? effectiveCombos(ctx.pass))?["LIGHTING"] ?? 0) != 0
         for m in stage.uniforms {
             let patch: PassPlan.Patch? = {
+                if LightUniforms.handles(m.name) { return .light(m.name, m.arrayCount, ctx.layer?.id, ["generic3", "genericimage3"].contains(ctx.pass.shader) && (ctx.pass.combos["SHADERVERSION"] ?? 0) < 62) }
+                if !particle, lighting,
+                   ["g_ModelMatrix", "g_NormalModelMatrix", "g_ViewProjectionMatrix", "g_AltModelMatrix", "g_AltNormalModelMatrix", "g_AltViewProjectionMatrix", "g_EyePosition"].contains(m.name) {
+                    return .litMatrix(m.name, ctx.layer?.id)
+                }
                 if particle, ["g_ModelMatrix", "g_ModelMatrixInverse", "g_ViewProjectionMatrix", "g_OrientationUp",
                               "g_OrientationRight", "g_OrientationForward", "g_ViewUp", "g_ViewRight", "g_EyePosition",
                               "g_RenderVar0", "g_RenderVar1"].contains(m.name) { return .particle(m.name) }
@@ -797,6 +826,7 @@ public final class SceneRenderer: WallpaperRenderer {
 
         // Sampler-linked combos (e.g. MASK) turn on when their slot has a texture.
         var combos = pass.combos.reduce(into: [String: Int]()) { $0[$1.key.uppercased()] = $1.value }
+        combos.merge(scene.lightCombos) { _, new in new }
         for a in try rawAnnotations(pass.shader) where a.type.hasPrefix("sampler") {
             if let combo = a.combo, let i = Int(a.name.dropFirst(9)), sources[i] != nil,
                i < max(pass.textures.count, fixedInputs.count), combos[combo.uppercased()] == nil {
@@ -843,7 +873,7 @@ public final class SceneRenderer: WallpaperRenderer {
         plan.usesAudio = uniformNames.contains { $0.hasPrefix("g_AudioSpectrum") }
         if let puppet { plan.puppet = try PuppetGeometry(model: puppet, layers: animationLayers, device: device) }
         plan.particle = particle
-        plan.isDynamic = puppet != nil || particle || plan.usesAudio || uniformNames.contains { frameVarying.contains($0) }
+        plan.isDynamic = puppet != nil || particle || plan.usesAudio || uniformNames.contains { frameVarying.contains($0) || LightUniforms.handles($0) }
             || sources.values.contains { if case .named = $0 { return true } else { return false } }
         plan.textureKey = textureKey
         plans[key] = plan
@@ -920,6 +950,20 @@ public final class SceneRenderer: WallpaperRenderer {
                 case .bonesAlpha:
                     for k in boneMatrices.indices { write([1], type: p.type, at: p.offset + k * p.stride, into: &u.template) }
                     continue
+                case .light(let name, let count, let id, let premultiply):
+                    let position = id.flatMap { layerIndexByID[$0] }.map { layerModel($0).columns.3 } ?? SIMD4<Float>(0, 0, 0, 1)
+                    let values = lightUniforms.values(name, count: count, reference: SIMD3(position.x, position.y, position.z), premultiplyTyped: premultiply)
+                    for (i, value) in values.enumerated() { write(value, type: p.type, at: p.offset + i * p.stride, into: &u.template) }
+                    continue
+                case .litMatrix(let name, let id):
+                    let model = id.flatMap { layerIndexByID[$0] }.map { layerModel($0) } ?? matrix_identity_float4x4
+                    if name == "g_EyePosition" {
+                        v = [scene.canvas.x / 2, scene.canvas.y / 2, scene.canvas.y / (2 * tan(scene.particleCamera.fov * .pi / 360))]
+                    } else if name.contains("Normal") {
+                        let n = model.inverse.transpose
+                        v = [n.columns.0.x, n.columns.0.y, n.columns.0.z, n.columns.1.x, n.columns.1.y, n.columns.1.z, n.columns.2.x, n.columns.2.y, n.columns.2.z]
+                    } else if name.contains("ViewProjection") { v = (mvp * model.inverse).flat }
+                    else { v = model.flat }
                 case .particle(let name): v = particleValues[name] ?? []
                 case .mvp: v = mvp.flat
                 case .mvpInverse: v = mvp.inverse.flat
@@ -1224,7 +1268,8 @@ public final class SceneRenderer: WallpaperRenderer {
 
         func source(_ ext: String) throws -> (String, String) {
             let rel = "shaders/\(shader).\(ext)"
-            return (try locator.string(rel), (rel as NSString).deletingLastPathComponent)
+            let source = Self.prepareLightingShader(try locator.string(rel))
+            return (source, (rel as NSString).deletingLastPathComponent)
         }
         let (vs, vdir) = try source("vert"), (fs, fdir) = try source("frag")
         // Combos are shared between stages: a combo declared in one applies to the other.
@@ -1265,8 +1310,8 @@ public final class SceneRenderer: WallpaperRenderer {
     }
 
     func pipelineState(_ program: inout Program, blend: String, format: MTLPixelFormat, key: String, particle: Bool = false, puppet: Bool = false) throws -> MTLRenderPipelineState {
-        let mode = ["translucent", "additive"].contains(blend) ? blend : "normal"
-        if !["normal", "translucent", "additive", "disabled"].contains(blend) {
+        let mode = ["translucent", "additive", "additivepremultiplied"].contains(blend) ? blend : "normal"
+        if !["normal", "translucent", "additive", "additivepremultiplied", "disabled"].contains(blend) {
             warn("blending '\(blend)' treated as normal")
         }
         let pkey = "\(mode)|\(format.rawValue)" + (particle ? "|particle" : "") + (puppet ? "|puppet" : "")
@@ -1300,8 +1345,8 @@ public final class SceneRenderer: WallpaperRenderer {
         case "translucent":
             a.sourceRGBBlendFactor = .sourceAlpha; a.destinationRGBBlendFactor = .oneMinusSourceAlpha
             a.sourceAlphaBlendFactor = .one; a.destinationAlphaBlendFactor = .oneMinusSourceAlpha
-        case "additive":
-            a.sourceRGBBlendFactor = .sourceAlpha; a.destinationRGBBlendFactor = .one
+        case "additive", "additivepremultiplied":
+            a.sourceRGBBlendFactor = mode == "additivepremultiplied" ? .one : .sourceAlpha; a.destinationRGBBlendFactor = .one
             a.sourceAlphaBlendFactor = .zero; a.destinationAlphaBlendFactor = .one
         default: break
         }
