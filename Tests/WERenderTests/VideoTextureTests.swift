@@ -124,6 +124,7 @@ final class VideoTextureTests: XCTestCase {
     }
 
     func testSceneVideoFramesAndSharing() throws {
+        try requireVideoCodecs()
         guard MTLCreateSystemDefaultDevice() != nil else { throw XCTSkip("Metal unavailable") }
         let renderer = try SceneRenderer(project: fixture, assets: nil)
         func pixels(_ time: Float) throws -> Data {

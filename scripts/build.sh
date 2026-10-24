@@ -4,6 +4,9 @@
 # one, else "mac-wallpaper development" (scripts/setup-signing.sh), else ad-hoc.
 set -euo pipefail
 cd "${0:A:h}/.."
+VERSION=${VERSION:-$(git describe --tags --match 'v*' --abbrev=0 2>/dev/null | sed 's/^v//' || true)}
+VERSION=${VERSION:-0.0.0-dev}
+BUILD=${BUILD:-$(git rev-list --count HEAD)}
 swift build -c release
 BIN=$(swift build -c release --show-bin-path)
 APP=.build/MacWallpaper.app
@@ -22,7 +25,8 @@ cat > $APP/Contents/Info.plist <<PLIST
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleDevelopmentRegion</key><string>en</string>
   <key>CFBundleLocalizations</key><array><string>en</string><string>zh-Hans</string></array>
-  <key>CFBundleShortVersionString</key><string>0.1</string>
+  <key>CFBundleShortVersionString</key><string>$VERSION</string>
+  <key>CFBundleVersion</key><string>$BUILD</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
@@ -30,9 +34,13 @@ cat > $APP/Contents/Info.plist <<PLIST
 PLIST
 # An Apple Development certificate (free Apple ID in Xcode) carries a team ID: the Keychain then keeps
 # granting access across rebuilds. Without one, macOS keys Keychain access to each build's code hash.
-IDENTITIES=$(security find-identity -v -p codesigning)
-IDENTITY=$(print -r -- "$IDENTITIES" | sed -n 's/.*"\(Apple Development: [^"]*\)".*/\1/p' | head -1)
-[[ -z $IDENTITY ]] && print -r -- "$IDENTITIES" | grep -q '"mac-wallpaper development"' && IDENTITY="mac-wallpaper development"
+if [[ ${SIGN:-} == adhoc ]]; then
+  IDENTITY=-
+else
+  IDENTITIES=$(security find-identity -v -p codesigning)
+  IDENTITY=$(print -r -- "$IDENTITIES" | sed -n 's/.*"\(Apple Development: [^"]*\)".*/\1/p' | head -1)
+  [[ -z $IDENTITY ]] && print -r -- "$IDENTITIES" | grep -q '"mac-wallpaper development"' && IDENTITY="mac-wallpaper development"
+fi
 if [[ -n $IDENTITY ]]; then
   codesign --force --sign "$IDENTITY" $APP
   # wecli reads the same Steam login, so it needs the same team signature (and a fixed identifier).

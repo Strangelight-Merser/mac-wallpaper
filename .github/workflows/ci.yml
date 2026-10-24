@@ -1,0 +1,52 @@
+name: CI
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+          fetch-depth: 0
+      - name: Select Xcode
+        run: scripts/select-xcode.sh
+      - name: Submodule cache key
+        id: submodules
+        run: echo "sha=$(git submodule status | shasum -a 256 | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: .build
+          key: swift-${{ runner.os }}-${{ runner.arch }}-xcode26.3-${{ hashFiles('Package.resolved', 'Package.swift') }}-${{ steps.submodules.outputs.sha }}-${{ github.sha }}
+          restore-keys: |
+            swift-${{ runner.os }}-${{ runner.arch }}-xcode26.3-${{ hashFiles('Package.resolved', 'Package.swift') }}-${{ steps.submodules.outputs.sha }}-
+      - name: Build
+        run: |
+          rm -f .build/tests.log
+          swift build
+      - name: Test
+        run: |
+          set -o pipefail
+          swift test 2>&1 | tee .build/tests.log
+      - name: Test summary
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+          report = Path(".build/tests.log")
+          log = report.read_text() if report.exists() else ""
+          totals = re.findall(r"Executed (\d+) tests?, (?:with (\d+) tests? skipped and )?(?:with )?(\d+) failures?", log)
+          failed = len(re.findall(r"^Test Case .* failed \(", log, re.MULTILINE))
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+              if not totals or not re.search(r"Test Suite 'All tests' (?:passed|failed)", log):
+                  summary.write("No complete test counts: build or test execution did not complete.\n")
+              else:
+                  total, skipped, failures = totals[-1]
+                  total, skipped = int(total), int(skipped or 0)
+                  summary.write(f"Tests: {total} | Passed: {total - skipped - failed} | Skipped: {skipped} | Failed tests: {failed} | Failures: {failures}\n")
+          PY
