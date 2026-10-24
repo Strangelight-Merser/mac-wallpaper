@@ -715,7 +715,7 @@ SwiftUI（macOS 14），原生 macOS 风格，作为风格讨论的基础；代�
 
 **灯光**：场景里的灯光对象（点光、聚光、管状光、平行光）按帧算出场景坐标，同时填两套 WE 着色器接口：老的 4 灯 `g_LightsPosition`/`g_LightsColorRadius`，和新的按类型数组 `g_LPoint_*` 等（数量用 `LIGHTS_*` 组合宏，取 `lightconfig` 与实际数量的较大值）。只有开了 `LIGHTING` 的材质会被照亮。
 
-**体积光**：`castvolumetrics` 的灯光按 WE 资源里的 volumetrics 材质与着色器推出的做法画在后处理里（径向衰减、密度、模糊、叠加）。按正交视图、半分辨率、每灯 24 次采样实现，阴影、cookie、雾的调制没做；推测的部分都在 `enableApproximateVolumetrics` 一个开关后面。「Youth」（10 盏）开销偏大：App 里 GPU 约 19 ms/帧，30 fps 够用，60 fps 不够。
+**体积光**：`castvolumetrics` 的灯光按 WE 资源里的 volumetrics 材质与着色器推出的做法画在后处理里（径向衰减、密度、模糊、叠加）。按正交视图、半分辨率、每灯 24 次采样实现，阴影、cookie、雾的调制没做；推测的部分都在 `enableApproximateVolumetrics` 一个开关后面。每盏灯只画它半径覆盖的屏幕矩形，四分之一分辨率（光晕本来就柔和、还要模糊），灯光不变时直接复用上一帧的结果。「Youth」（10 盏）GPU 从约 19 ms/帧降到约 4.5 ms，画面在比较容差内不变。
 
 **形状图层**：`"shape": "quad"` 的对象当作效果图层画（`DIRECTDRAW` 的效果直接叠加到场景上），「Youth」顶上的光束因此出现，和 WE 预览一致。
 

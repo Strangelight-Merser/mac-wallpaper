@@ -723,6 +723,8 @@ public final class SceneRenderer: WallpaperRenderer {
     var plans: [String: PassPlan] = [:]
     var frameLights: [FrameLight] = []
     var volumetricPipeline: MTLRenderPipelineState?
+    /// Parameters the cached volumetric image was drawn with.
+    var volumetricKey: [UInt8] = []
     public var enableApproximateVolumetrics = true
 
     /// Uniform buffer template for a stage: static values written, per-frame values recorded as patches.
