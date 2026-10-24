@@ -30,6 +30,7 @@
 "Unsupported video format" = "不支持的视频格式";
 "Windows program" = "Windows 程序";
 "Unknown objects" = "未知对象";
+"The wallpaper this preset changes" = "此预设所修改的壁纸";
 "Checking…" = "正在检查…";
 "Search titles and tags" = "搜索标题和标签";
 "Recently Modified" = "最近修改";
@@ -262,7 +263,11 @@
 "Most Subscribed" = "订阅最多";
 "All Types" = "全部类型";
 "Search the Workshop" = "搜索创意工坊";
-"Presets aren’t supported yet. A preset changes the settings of another wallpaper, which it needs too." = "暂不支持预设。预设用来修改另一个壁纸的设置，需要连同那个壁纸一起下载。";
+"A preset: “%@” with other settings and pictures. “%@” is already in your library." = "这是预设：换了设置和图片的“%1$@”。“%2$@”已在你的壁纸库中。";
+"A preset: “%@” with other settings and pictures. “%@” (%@) downloads with it." = "这是预设：换了设置和图片的“%1$@”。“%2$@”（%3$@）会一起下载。";
+"A preset, but the wallpaper it changes isn’t listed on the Workshop." = "这是预设，但它所修改的壁纸没有列在创意工坊中。";
+"A preset: another wallpaper with other settings and pictures." = "这是预设：换了设置和图片的另一个壁纸。";
+"Subscribe and Download" = "订阅并下载";
 "Type" = "类型";
 "Couldn’t Load the Workshop" = "无法加载创意工坊";
 "In your library" = "已在你的壁纸库中";
@@ -275,3 +280,8 @@
 "Subscribe and Download (%@)" = "订阅并下载（%@）";
 "Unsubscribe" = "取消订阅";
 "Browse the Workshop" = "浏览创意工坊";
+"Use the Wallpaper’s Own Picture" = "使用壁纸自带的图片";
+"Choose a picture, an animated GIF or a video." = "选择一张图片、动图或一段视频。";
+"Choose…" = "选择…";
+"Preset Of" = "预设来源";
+"Workshop item %@ (not downloaded)" = "创意工坊物品 %@（未下载）";

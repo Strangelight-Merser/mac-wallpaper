@@ -75,6 +75,17 @@ struct Inspector: View {
                                 Text("Modified").foregroundStyle(.secondary)
                                 Text(entry.modified.formatted(date: .abbreviated, time: .omitted))
                             }
+                            if let preset = entry.preset {
+                                GridRow {
+                                    Text("Preset Of").foregroundStyle(.secondary)
+                                    if let base = model.entries.first(where: { $0.folder == preset.baseFolder }) {
+                                        Button { model.selection = base.id } label: { Text(base.title).lineLimit(2) }
+                                            .buttonStyle(.link)
+                                    } else {
+                                        Text("Workshop item \(String(preset.base)) (not downloaded)")
+                                    }
+                                }
+                            }
                             if let id = entry.workshopID {
                                 GridRow {
                                     Text("Workshop ID").foregroundStyle(.secondary)
@@ -330,11 +341,33 @@ private struct PropertyRow: View {
                     .onAppear { text = value ?? "" }
                     .onChange(of: value) { text = value ?? "" }
             }
+        case .sceneTexture:
+            LabeledContent {
+                HStack(spacing: 6) {
+                    if let value, !value.isEmpty {
+                        Text(URL(fileURLWithPath: value).lastPathComponent)
+                            .foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle).help(value)
+                        Button { set("") } label: { Image(systemName: "xmark.circle.fill") }
+                            .buttonStyle(.borderless).foregroundStyle(.secondary)
+                            .help(Text("Use the Wallpaper’s Own Picture"))
+                    }
+                    Button { Self.choosePicture(set) } label: { Text("Choose…") }.controlSize(.small)
+                }
+            } label: { Text(label.text) }
         case .file, .directory, .unknown:
             LabeledContent { Text(value ?? "").foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle) } label: {
                 Text(label.text)
             }
         }
+    }
+
+    /// Pictures, animated GIFs and videos replace a scene texture.
+    static func choosePicture(_ set: @escaping (String) -> Void) {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image, .movie]
+        panel.message = String(localized: "Choose a picture, an animated GIF or a video.")
+        NSApp.activate()
+        if panel.runModal() == .OK, let url = panel.url { set(url.path) }
     }
 
     static func decimals(_ step: Double) -> Int {

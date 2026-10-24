@@ -7,7 +7,8 @@ import WEVideo
 /// Renderer capabilities that a wallpaper uses but cannot fully reproduce.
 public enum Feature: String, Codable, Sendable, CaseIterable, CodingKeyRepresentable {
     case particles, text, model3D, puppetWarp, sound, light, sceneScript, videoTexture,
-         missingEffect, shaderError, missingAsset, unsupportedVideoCodec, applicationWallpaper, unknownObject
+         missingEffect, shaderError, missingAsset, unsupportedVideoCodec, applicationWallpaper, unknownObject,
+         missingBase
 }
 
 /// A static assessment, optionally supplemented by a small rendered frame.
@@ -28,7 +29,7 @@ public struct Compatibility: Codable, Sendable, Equatable {
 
 /// Checks local assets and unsupported features without needing a GPU for static checks.
 public struct CompatibilityChecker: Sendable {
-    public static let version = 7
+    public static let version = 8
     private let assets: URL?
 
     public init(assets: URL?) { self.assets = assets }

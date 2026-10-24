@@ -2,6 +2,11 @@ import Foundation
 import CoreFoundation
 
 public struct WallpaperProperty: Sendable, Equatable, Identifiable {
+    /// The same property with another default (a preset's value).
+    public func withDefault(_ value: String?) -> WallpaperProperty {
+        WallpaperProperty(id: id, kind: kind, label: label, order: order, defaultValue: value, condition: condition)
+    }
+
     public struct Option: Sendable, Equatable {
         public let label: String
         public let value: String
@@ -9,7 +14,8 @@ public struct WallpaperProperty: Sendable, Equatable, Identifiable {
     public enum Kind: Sendable, Equatable {
         case bool
         case slider(min: Double, max: Double, step: Double?, precision: Int?, fraction: Bool)
-        case color, combo(options: [Option]), textInput, label, group, file, directory, unknown(String)
+        /// `sceneTexture`: a picture (or GIF, video) that replaces one of a scene's textures; the value is a path.
+        case color, combo(options: [Option]), textInput, label, group, file, directory, sceneTexture, unknown(String)
     }
     public let id: String
     public let kind: Kind
@@ -50,6 +56,7 @@ public enum WallpaperProperties {
             case "group": kind = .group
             case "file": kind = .file
             case "directory": kind = .directory
+            case "scenetexture": kind = .sceneTexture
             default: kind = .unknown(type)
             }
             var value = string(p["value"])
@@ -62,6 +69,23 @@ public enum WallpaperProperties {
                                      condition: p["condition"] as? String)
         }.sorted { ($0.order, indices[$0.id] ?? 0, $0.id) < ($1.order, indices[$1.id] ?? 0, $1.id) }
     }
+    /// A preset's values (`project.json` → `preset`). Paths to files in the preset's folder become absolute,
+    /// since the base wallpaper plays from its own folder.
+    public static func presetValues(folder: URL) -> [String: String] {
+        let url = folder.appendingPathComponent("project.json")
+        guard let project = (try? JSONSerialization.jsonObject(with: Data(contentsOf: url))) as? [String: Any],
+              let preset = project["preset"] as? [String: Any] else { return [:] }
+        return preset.reduce(into: [:]) { values, item in
+            guard var value = string(item.value) else { return }
+            if !value.isEmpty, !value.hasPrefix("/"), value.contains(where: { $0 == "/" || $0 == "." }) {
+                let file = folder.appendingPathComponent(value).standardizedFileURL
+                if file.path.hasPrefix(folder.standardizedFileURL.path + "/"),
+                   FileManager.default.fileExists(atPath: file.path) { value = file.path }
+            }
+            values[item.key] = value
+        }
+    }
+
     public static func isVisible(_ property: WallpaperProperty, values: [String: String]) -> Bool {
         guard let source = property.condition, !source.isEmpty else { return true }
         var parser = PropertyCondition(source, values: values)

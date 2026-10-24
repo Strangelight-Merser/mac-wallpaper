@@ -24,6 +24,8 @@ public struct WorkshopItem: Sendable, Codable, Equatable {
     public var votesDown: UInt64?
     public var timeCreated: Date?
     public var metadata: String?
+    /// Items this one requires, e.g. a preset's base wallpaper.
+    public var children: [UInt64]?
 
     /// Steam UGC resizing parameters; preserves unrelated URL parameters.
     public func previewURL(width: Int = 320, height: Int = 180) -> URL? {

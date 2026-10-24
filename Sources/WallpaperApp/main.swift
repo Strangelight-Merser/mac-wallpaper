@@ -88,8 +88,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
         controller.contentMode = LibraryModel.storedContentMode(path: path)
-        controller.load(wallpaper: URL(fileURLWithPath: path),
-                        assets: AssetsModel.currentLocation, properties: libraryModel.propertyOverrides(path: path))
+        let target = libraryModel.loadTarget(path: path)
+        controller.load(wallpaper: target.folder, assets: AssetsModel.currentLocation, properties: target.properties)
         libraryModel.currentPath = path
         log("loading \(path)")
         refreshMenu()

@@ -78,6 +78,7 @@ public actor WallpaperLibrary {
         let assetStamps = assets.map { root in [FileStamp(root.appendingPathComponent("shaders")), FileStamp(root.appendingPathComponent("materials"))] } ?? []
         var next: [Record] = []
         var identities: [String: Int] = [:]
+        var entries: [WallpaperEntry] = []
         for (folder, kind) in LibraryRoots.discover(roots) {
             if Task.isCancelled { return LibraryDiff(added: [], updated: [], removed: [], cancelled: true) }
             var entry = WallpaperEntry(folder: folder, root: kind)
@@ -85,17 +86,31 @@ public actor WallpaperLibrary {
             let occurrence = identities[base, default: 0]
             identities[base] = occurrence + 1
             if occurrence > 0 { entry.id += "#\(occurrence + 1)"; entry.duplicateOf = base }
-            let fingerprint = folderStamps(folder: folder, file: entry.file)
+            entries.append(entry)
+        }
+        // Presets play their base wallpaper, found by workshop ID anywhere in the library.
+        var bases: [UInt64: WallpaperEntry] = [:]
+        for entry in entries where entry.preset == nil && entry.duplicateOf == nil {
+            if let id = entry.workshopID, bases[id] == nil { bases[id] = entry }
+        }
+        for i in entries.indices { if let preset = entries[i].preset { entries[i].resolvePreset(base: bases[preset.base]) } }
+        for var entry in entries {
+            if Task.isCancelled { return LibraryDiff(added: [], updated: [], removed: [], cancelled: true) }
+            let folder = entry.folder
+            let fingerprint = entry.stamps
             var deepRequested = deep
             if let previous = old[folder.path], previous.fingerprint == fingerprint, assetStamps == storedAssets,
                let compatibility = previous.entry.compatibility, compatibility.checkerVersion == checkerVersion,
                !deep || previous.deepRequested {
                 entry.compatibility = compatibility
                 deepRequested = previous.deepRequested
+            } else if let preset = entry.preset, preset.baseFolder == nil {
+                entry.compatibility = Compatibility(status: .unsupported, missing: [.missingBase: 1],
+                                                    notes: ["base wallpaper \(preset.base) not in the library"])
             } else {
                 var compatibility: Compatibility
-                if let checker { compatibility = await checker(entry, assets, deep) }
-                else { compatibility = await CompatibilityChecker(assets: assets).check(entry, deep: deep) }
+                if let checker { compatibility = await checker(entry.content, assets, deep) }
+                else { compatibility = await CompatibilityChecker(assets: assets).check(entry.content, deep: deep) }
                 compatibility.checkerVersion = checkerVersion
                 entry.compatibility = compatibility
             }

@@ -32,7 +32,7 @@ public struct WorkshopQuery: Sendable, Equatable {
         requiredTags.forEach { p.string(6, $0) }; excludedTags.forEach { p.string(7, $0) }
         p.uint(8, 1)
         if let searchText { p.string(11, searchText) }
-        for field in [17, 18, 20, 22, 32, 37, 38] { p.uint(field, 1) }
+        for field in [17, 18, 20, 21, 22, 32, 37, 38] { p.uint(field, 1) }  // 21: children (a preset's base)
         p.string(39, cursor)
         return p.data
     }
@@ -67,6 +67,8 @@ public struct WorkshopPage: Sendable, Codable {
             item.subscriptions = v.contains(36) ? v.uint(36) : nil
             item.favorites = v.contains(37) ? v.uint(37) : nil
             item.metadata = v.contains(58) ? v.string(58) : nil
+            let children = try v.repeated(53).map { try ProtoReader($0).uint(1) }.filter { $0 > 0 }
+            item.children = children.isEmpty ? nil : children
             if v.contains(55) {
                 let votes = try ProtoReader(v.bytes(55))
                 if votes.contains(1) {

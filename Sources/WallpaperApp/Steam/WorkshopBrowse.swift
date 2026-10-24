@@ -96,15 +96,38 @@ final class WorkshopBrowseModel {
         subscribed.contains(item.id) || !unsubscribed.contains(item.id) && steam.subscriptions.contains { $0.id == item.id }
     }
 
-    /// Subscribes on Steam (as WE does) and downloads it; the button showed the size.
+    /// Subscribes on Steam (as WE does) and downloads it; the button showed the size. A preset brings its base
+    /// wallpaper along, as WE does with required items.
     func subscribe(_ item: WorkshopItem) {
+        let items = [base(of: item), item].compactMap { $0 }
         Task {
             do {
-                try await steam.connection.run { client, _ in try await WorkshopBrowser(client: client).subscribe(item.id) }
-                subscribed.insert(item.id); unsubscribed.remove(item.id)
-                if !isInLibrary(item) { steam.queue.enqueue([item]) }
+                try await steam.connection.run { client, _ in
+                    for item in items { try await WorkshopBrowser(client: client).subscribe(item.id) }
+                }
+                for item in items { subscribed.insert(item.id); unsubscribed.remove(item.id) }
+                steam.queue.enqueue(items.filter { !isInLibrary($0) })
             } catch { state = .failed(SteamModel.message(error)) }
         }
+    }
+
+    // MARK: - presets
+
+    /// Base wallpapers of presets (Steam lists them as child items), looked up when a preset is shown.
+    private(set) var bases: [UInt64: WorkshopItem] = [:]
+
+    func base(of item: WorkshopItem) -> WorkshopItem? { item.children?.first.flatMap { bases[$0] } }
+
+    func loadBase(of item: WorkshopItem) {
+        guard item.kind == .preset, let id = item.children?.first, bases[id] == nil else { return }
+        Task { if let base = try? await SteamWorkshop().details([id]).first, base.result == 1 { bases[id] = base } }
+    }
+
+    /// What subscribing downloads: a preset's base too, unless it's already here. Nil while that is unknown.
+    func downloadSize(_ item: WorkshopItem) -> Int64? {
+        guard item.kind == .preset else { return item.fileSize }
+        guard let base = base(of: item) else { return nil }
+        return item.fileSize + (isInLibrary(base) ? 0 : base.fileSize)
     }
 
     /// Unsubscribes on Steam; the downloaded copy stays in the library until the user removes it.
@@ -391,10 +414,7 @@ struct WorkshopInspector: View {
                         }
                         .font(.callout)
                     } else if item.kind == .preset {
-                        Label {
-                            Text("Presets aren’t supported yet. A preset changes the settings of another wallpaper, which it needs too.")
-                        } icon: { Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.yellow) }
-                        .font(.callout).fixedSize(horizontal: false, vertical: true)
+                        presetNote(item)
                     } else if item.kind == .scene {
                         Text("Whether a scene works fully on this Mac is checked after it downloads.")
                             .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
@@ -431,6 +451,26 @@ struct WorkshopInspector: View {
         }
     }
 
+    /// What a preset is and what it brings along.
+    @ViewBuilder private func presetNote(_ item: WorkshopItem) -> some View {
+        Group {
+            if let base = browse.base(of: item) {
+                let size = base.fileSize.formatted(.byteCount(style: .file))
+                if browse.isInLibrary(base) {
+                    Text("A preset: “\(base.title)” with other settings and pictures. “\(base.title)” is already in your library.")
+                } else {
+                    Text("A preset: “\(base.title)” with other settings and pictures. “\(base.title)” (\(size)) downloads with it.")
+                }
+            } else if item.children?.isEmpty ?? true {
+                Text("A preset, but the wallpaper it changes isn’t listed on the Workshop.")
+            } else {
+                Text("A preset: another wallpaper with other settings and pictures.")
+            }
+        }
+        .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        .task(id: item.id) { browse.loadBase(of: item) }
+    }
+
     @ViewBuilder private func actions(_ item: WorkshopItem) -> some View {
         HStack {
             if browse.isInLibrary(item) {
@@ -438,10 +478,17 @@ struct WorkshopInspector: View {
                     .controlSize(.large).disabled(true)
             } else {
                 Button { browse.subscribe(item) } label: {
-                    Text("Subscribe and Download (\(item.fileSize.formatted(.byteCount(style: .file))))").frame(maxWidth: .infinity)
+                    Group {
+                        if let size = browse.downloadSize(item) {
+                            Text("Subscribe and Download (\(size.formatted(.byteCount(style: .file))))")
+                        } else {
+                            Text("Subscribe and Download")
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent).controlSize(.large)
-                .disabled(item.kind == .application || item.kind == .preset)
+                .disabled(item.kind == .application || browse.downloadSize(item) == nil)
             }
             Menu {
                 if browse.isSubscribed(item) {

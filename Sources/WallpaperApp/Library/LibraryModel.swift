@@ -170,9 +170,14 @@ final class LibraryModel {
 
     func properties(for entry: WallpaperEntry) -> [WallpaperProperty] {
         if let cached = propertyCache[entry.id] { return cached }
-        let url = entry.folder.appendingPathComponent("project.json")
+        // A preset shows its base's settings, starting from the preset's values.
+        let url = (entry.preset?.baseFolder ?? entry.folder).appendingPathComponent("project.json")
         let project = (try? JSONSerialization.jsonObject(with: Data(contentsOf: url))) as? [String: Any] ?? [:]
-        let parsed = WallpaperProperties.parse(project: project)
+        var parsed = WallpaperProperties.parse(project: project)
+        if entry.preset != nil {
+            let preset = WallpaperProperties.presetValues(folder: entry.folder)
+            parsed = parsed.map { p in preset[p.id].map { p.withDefault($0) } ?? p }
+        }
         propertyCache[entry.id] = parsed
         return parsed
     }
@@ -202,11 +207,17 @@ final class LibraryModel {
         return !propertyStore.overrides(for: entry.id, properties: properties(for: entry)).isEmpty
     }
 
-    /// The user's changes for a wallpaper folder, for loading it.
-    func propertyOverrides(path: String) -> [String: String] {
+    /// What to load for a chosen wallpaper folder: the folder and the user's changes; for a preset, its base's
+    /// folder with the preset's values under the user's changes.
+    func loadTarget(path: String) -> (folder: URL, properties: [String: String]) {
         let url = URL(fileURLWithPath: path).standardizedFileURL
         let entry = entries.first { $0.folder.standardizedFileURL == url } ?? WallpaperEntry(folder: url, root: .userFolder)
-        return propertyStore.overrides(for: entry.id, properties: properties(for: entry))
+        let changes = propertyStore.overrides(for: entry.id, properties: properties(for: entry))
+        guard let preset = entry.preset else { return (url, changes) }
+        // At launch the library may not be scanned yet: Steam and our downloads name folders by workshop ID.
+        let base = preset.baseFolder ?? roots.lazy.map { $0.url.appendingPathComponent(String(preset.base)) }
+            .first { FileManager.default.fileExists(atPath: $0.appendingPathComponent("project.json").path) } ?? url
+        return (base, WallpaperProperties.presetValues(folder: url).merging(changes) { _, user in user })
     }
 
     func contentMode(for entry: WallpaperEntry) -> ContentMode {

@@ -15,7 +15,7 @@ final class WorkshopQueryTests: XCTestCase {
             XCTAssertEqual(p.repeated(7).count, 2); XCTAssertEqual(p.uint(8), 1)
             XCTAssertEqual(p.string(11), "夜空 & stars"); XCTAssertEqual(p.string(39), "next+/=")
             XCTAssertFalse(p.contains(2))
-            for f in [17, 18, 20, 22, 32, 37, 38] { XCTAssertEqual(p.uint(f), 1) }
+            for f in [17, 18, 20, 21, 22, 32, 37, 38] { XCTAssertEqual(p.uint(f), 1) }
             if type == 3 { XCTAssertEqual(p.uint(14), 7) }
         }
         for n in [0, 101, -1] { XCTAssertThrowsError(try WorkshopQuery(pageSize: n).request(cursor: "*")) }
@@ -40,6 +40,16 @@ final class WorkshopQueryTests: XCTestCase {
         var response = ProtoWriter(); response.uint(1, 1); response.bytes(2, sparse.data)
         let missing = try WorkshopPage.parse(response.data).items[0]
         XCTAssertNil(missing.kind); XCTAssertNil(missing.voteScore); XCTAssertEqual(missing.result, 2)
+        XCTAssertNil(missing.children)
+    }
+    func testPresetKindAndChildren() throws {
+        var item = ProtoWriter(); item.uint(1, 1); item.uint(2, 222); item.uint(5, 431960)
+        // Presets carry their base's type tag too.
+        for name in ["Scene", "Preset", "Everyone"] { var t = ProtoWriter(); t.string(1, name); item.bytes(52, t.data) }
+        var child = ProtoWriter(); child.uint(1, 111); child.uint(2, 0); child.uint(3, 0); item.bytes(53, child.data)
+        var p = ProtoWriter(); p.uint(1, 1); p.bytes(2, item.data)
+        let value = try XCTUnwrap(WorkshopPage.parse(p.data).items.first)
+        XCTAssertEqual(value.kind, .preset); XCTAssertEqual(value.children, [111])
         XCTAssertThrowsError(try WorkshopPage.parse(Data()))
         XCTAssertThrowsError(try WorkshopPage.parse(Data([0xff])))
         var bad = ProtoWriter(); bad.uint(1, 1); bad.bytes(2, Data())

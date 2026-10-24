@@ -80,6 +80,7 @@ extension Feature {
         case .unsupportedVideoCodec: String(localized: "Unsupported video format")
         case .applicationWallpaper: String(localized: "Windows program")
         case .unknownObject: String(localized: "Unknown objects")
+        case .missingBase: String(localized: "The wallpaper this preset changes")
         }
     }
 }

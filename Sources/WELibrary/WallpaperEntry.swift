@@ -31,6 +31,14 @@ public struct WallpaperEntry: Codable, Sendable, Identifiable, Equatable {
     public var compatibility: Compatibility?
     public var problems: [String]
     public var duplicateOf: String?
+    /// Set for a preset: another wallpaper (its base) with different settings and files.
+    public var preset: Preset?
+
+    public struct Preset: Codable, Sendable, Equatable {
+        public var base: UInt64
+        /// The base's folder, once the library has found it.
+        public var baseFolder: URL?
+    }
 
     /// Reads lenient project JSON; invalid fields are reported without losing the folder.
     public init(folder: URL, root: LibraryRoot.Kind) {
@@ -50,15 +58,20 @@ public struct WallpaperEntry: Codable, Sendable, Identifiable, Equatable {
             return string
         }
         title = text("title", required: true) ?? folder.lastPathComponent
-        file = text("file", required: true) ?? ""
+        // A preset names its base ("dependency") instead of a file; type and file come from the base.
+        let dependency = WallpaperProperties.string(project["dependency"]).flatMap(UInt64.init)
+        if let dependency, dependency > 0, project["file"] == nil { preset = Preset(base: dependency) }
+        file = preset == nil ? text("file", required: true) ?? "" : ""
         let rawType = text("type")?.lowercased()
         type = rawType.flatMap(WallpaperType.init(rawValue:)) ?? (rawType == nil ? Self.inferredType(file) : .unknown)
-        if type == .unknown { issues.append("missing or unknown type") }
+        if type == .unknown, preset == nil { issues.append("missing or unknown type") }
         if let raw = project["workshopid"] {
             let string = (raw as? String) ?? (raw as? NSNumber).map { $0.stringValue }
             workshopID = string.flatMap(UInt64.init)
             if workshopID == nil || workshopID == 0 { workshopID = nil; issues.append("invalid workshopid") }
         }
+        // Presets carry no workshopid; their download folder is named after it.
+        if workshopID == nil, preset != nil, let id = UInt64(folder.lastPathComponent), id > 0 { workshopID = id }
         id = workshopID.map { "ws:\($0)" } ?? "dir:\(pathHash(self.folder.path))"
         tags = []
         if let raw = project["tags"] {
@@ -97,6 +110,37 @@ public struct WallpaperEntry: Codable, Sendable, Identifiable, Equatable {
         }
         modified = folderStamps(folder: self.folder, file: file).compactMap(\.modified).max() ?? .distantPast
         problems = issues
+    }
+}
+
+extension WallpaperEntry {
+    /// A preset plays as its base: same renderer type and features. Without the base it can't play.
+    mutating func resolvePreset(base: WallpaperEntry?) {
+        guard var preset else { return }
+        preset.baseFolder = base?.folder
+        self.preset = preset
+        if let base {
+            type = base.type; file = base.file
+            hasUserProperties = base.hasUserProperties; audioResponsive = base.audioResponsive
+        } else {
+            type = .unknown; file = ""
+            problems.append("base wallpaper \(preset.base) not in the library")
+        }
+    }
+
+    /// The folder and entry file whose content plays: the base's for a preset.
+    var content: WallpaperEntry {
+        guard let folder = preset?.baseFolder else { return self }
+        var content = self
+        content.folder = folder
+        return content
+    }
+
+    /// Files whose changes mean the entry must be checked again.
+    var stamps: [FileStamp] {
+        let own = folderStamps(folder: folder, file: preset == nil ? file : "")
+        guard let base = preset?.baseFolder else { return own }
+        return own + folderStamps(folder: base, file: file)
     }
 }
 
