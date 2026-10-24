@@ -1,9 +1,13 @@
+<img src="docs/images/icon.png" width="128" alt="">
+
 # MacWallpaper
 
 **在 Mac 上用你的 Wallpaper Engine 壁纸。** MacWallpaper 是一款原生 macOS 应用（Swift + Metal），用你自己的
 Wallpaper Engine 和你在 Steam 创意工坊的订阅，在桌面上播放场景、视频和网页壁纸。
 
 [English](README.md)
+
+![MacWallpaper 随附的壁纸“Dusk”](docs/images/dusk.jpg)
 
 > MacWallpaper 与 Wallpaper Engine 开发团队及 Valve 没有任何关系，也不附带任何 Wallpaper Engine 的内容：你需要在
 > Steam 上拥有 Wallpaper Engine。
@@ -20,6 +24,7 @@ Wallpaper Engine 和你在 Steam 创意工坊的订阅，在桌面上播放场�
 - **原生、轻量**：菜单栏应用；桌面被遮挡、锁屏或显示器睡眠时自动暂停，也可以在用电池或低电量模式时暂停。常见场景每帧
   只占几毫秒 GPU。
 - **自动更新壁纸**：检查并安全地安装已订阅壁纸的更新（新版本完整下载之前，旧版本一直可用）。
+- **随附壁纸“Dusk”**（上图），是我们自己做的，装好就能用。
 - 支持简体中文和英文。
 
 完成度如何？2026 年 10 月对创意工坊趋势前 100 个场景壁纸做的统计里，最常缺的功能是木偶动画和灯光，现在都已支持；3D

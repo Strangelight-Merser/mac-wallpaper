@@ -723,6 +723,20 @@ SwiftUI（macOS 14），原生 macOS 风格，作为风格讨论的基础；代�
 
 **合并时修的问题**：灯光组合宏原本加到所有着色器（没灯光的场景也加了值为 0 的），还加到了粒子上；绳状粒子的程序是用自己的键和打过补丁的源码准备的，于是通用路径编译出未打补丁的版本，回归测试里 3 个绳状粒子用例出错。现在只加场景实际有的灯光类型，且不加给粒子。
 
+## 6.36 发布准备（2026-10-24）
+
+**用户的决定**：名字仍叫 MacWallpaper；代码放 GitHub（用户自己建仓库并推送）；暂不购买 Apple Developer Program，发布版用临时签名，用户第一次打开要在"隐私与安全性"里点"仍要打开"；内部文档公开，但先清理。
+
+**清理**：第一次推送前改写了全部历史：去掉本机路径（含用户名）、对 WE 程序做静态分析的那一节和另一产品的逆向报告提及。以后提交的文件里不写本机或临时目录路径（给 Codex 的样本路径放在命令里，不放进规格）。
+
+**完成**：
+- CI（GitHub Actions）：每次推送编译并测试；需要 Metal、WE 文件、钥匙串或音频设备的测试会自动跳过。打 `v*` 标签时编译临时签名的 App 和 wecli，打包 zip 和校验和，建一个草稿 Release（说明由我们写好后再发布）。版本号来自标签（`VERSION`/`BUILD` 可覆盖），`SIGN=adhoc` 强制临时签名。Homebrew cask 模板和 `scripts/update-cask.sh`。
+- README（英文、中文）、`THIRD_PARTY_NOTICES.md`；App 包里带 GPL 全文、第三方说明和 glslang、SPIRV-Cross、zstd 的许可证。
+- App 图标（`tools/make-icon.swift` 画的暮色山丘，macOS 图标形状）。
+- 随附壁纸「Dusk」：我们自己写的网页壁纸（暮色、视差山丘、跟随指针、随音乐律动的太阳），不依赖 WE 的任何文件；壁纸库里新增"随附壁纸"来源。顺带支持了工程自带的 `localization` 翻译表（很多创意工坊作者用它翻译设置名）。
+
+**还要用户做**：在 GitHub 建仓库（建议名 `mac-wallpaper`），把 README 和 cask 里的 `OWNER/REPO` 换掉，推送；第一次 CI 跑完后看结果（`macos-26` 运行环境是否可用）；打第一个标签发布。Homebrew 需要另建 `homebrew-tap` 仓库。自动更新（Sparkle）推迟：它需要 EdDSA 签名密钥（存在用户的钥匙串里，由用户生成）和放在仓库里的更新源。
+
 ## 7. 待确认
 1. 最低系统版本：建议 macOS 14（SMAppService、ScreenCaptureKit 音频成熟）。
 2. 工程形态：目前采用 SwiftPM + 生成 .app 的脚本（§6.11）；到需要正式签名分发时，再考虑加一个 Xcode 工程来包装。

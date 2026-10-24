@@ -1,3 +1,5 @@
+<img src="docs/images/icon.png" width="128" alt="">
+
 # MacWallpaper
 
 **Your Wallpaper Engine wallpapers, on your Mac.** MacWallpaper is a native macOS app (Swift and Metal) that plays
@@ -5,6 +7,8 @@ Wallpaper Engine scene, video and web wallpapers on the desktop, using your own 
 Steam Workshop subscriptions.
 
 [简体中文](README.zh-CN.md)
+
+![Dusk, the wallpaper that comes with MacWallpaper](docs/images/dusk.jpg)
 
 > MacWallpaper is not affiliated with Wallpaper Engine Team or Valve. It ships no Wallpaper Engine content: you need
 > to own Wallpaper Engine on Steam.
@@ -25,6 +29,7 @@ Steam Workshop subscriptions.
   per frame.
 - **Keeps your library up to date**: updates of subscribed wallpapers are checked and installed safely (the old
   version stays until the new one has fully arrived).
+- **Comes with "Dusk"**, a wallpaper of our own (shown above), so there is something to play right away.
 - English and Simplified Chinese.
 
 How far along is it? In a survey of the 100 trending scene wallpapers on the Workshop (October 2026), puppet
