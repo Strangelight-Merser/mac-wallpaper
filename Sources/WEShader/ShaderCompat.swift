@@ -55,6 +55,14 @@ extension ShaderPreprocessor {
                let n = components(m[2]), balancedCall(m[4]) {
                 l = "\(m[1])\(m[2]) \(m[3]) = \(m[4])\(swizzles[n]);\(m[5])"
             }
+            // E) arithmetic with a narrower constructor, `v_TexCoord - CAST2(u_offset)` with a vec3 v_TexCoord:
+            //    HLSL truncates the wider operand.
+            l = replace(#"(?<![.\w])(\w+)(\s*[-+*/]\s*)((?:CAST|vec)([234])\s*\()"#, in: l) { (m: [String]) in
+                "\(truncate(m[1], to: Int(m[4])!))\(m[2])\(m[3])"
+            }
+            l = replace(#"((?:CAST|vec)([234])\s*\([^()]*\))(\s*[-+*/]\s*)(\w+)\b(?!\s*[.\[(])"#, in: l) { (m: [String]) in
+                "\(m[1])\(m[3])\(truncate(m[4], to: Int(m[2])!))"
+            }
             // D) arguments to user functions
             for (name, params) in functions where l.contains(name + "(") {
                 l = rewriteCalls(of: name, in: l) { args in

@@ -215,6 +215,17 @@ public enum ShaderPreprocessor {
 
     static func firstMatch(_ pattern: String, _ s: String) -> [String]? { allMatches(pattern, s).first }
 
+    /// Replaces each match with what `transform` returns for its groups.
+    static func replace(_ pattern: String, in s: String, transform: ([String]) -> String) -> String {
+        let re = try! NSRegularExpression(pattern: pattern)
+        var out = s
+        for m in re.matches(in: s, range: NSRange(s.startIndex..., in: s)).reversed() {
+            let groups = (0..<m.numberOfRanges).map { i in Range(m.range(at: i), in: s).map { String(s[$0]) } ?? "" }
+            if let range = Range(m.range, in: out) { out.replaceSubrange(range, with: transform(groups)) }
+        }
+        return out
+    }
+
     static func replace(_ pattern: String, in s: String, with template: String) -> String {
         let re = try! NSRegularExpression(pattern: pattern)
         return re.stringByReplacingMatches(in: s, range: NSRange(s.startIndex..., in: s),

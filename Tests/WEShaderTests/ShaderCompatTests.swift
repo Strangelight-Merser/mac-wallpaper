@@ -87,6 +87,21 @@ final class ShaderCompatTests: XCTestCase {
         XCTAssertTrue(pair.1.contains("if (enabled)"))
     }
 
+    func testMixedWidthArithmetic() throws {
+        // HLSL truncates the wider operand (seen in a workshop vignette: `v_TexCoord - CAST2(u_offset)`).
+        let pair = try assertRepair(fragment: """
+        uniform vec2 u_offset;
+        void main() {
+            vec3 p = vec3(0.5, 0.25, 1.0);
+            float s = length(p - vec2(u_offset));
+            float t = length(vec2(u_offset) * p);
+            gl_FragColor = vec4(s + t);
+        }
+        """, error: "wrong operand types")
+        XCTAssertTrue(pair.1.contains("p.xy - vec2(u_offset)"))
+        XCTAssertTrue(pair.1.contains("vec2(u_offset) * p.xy"))
+    }
+
     func testRuntimeGlobalConstantsAndDependencies() throws {
         let pair = try assertRepair(vertex: """
         uniform float amount;
