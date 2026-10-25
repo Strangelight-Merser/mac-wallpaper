@@ -1,6 +1,6 @@
 cask "macwallpaper" do
-  version "0.0.0-dev"
-  sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+  version "0.1.0"
+  sha256 "7d0f2128a92ccee5954faf0da9bb1e3b68e316d14b54dd06e44f15a6b14b48da"
 
   url "https://github.com/Strangelight-Merser/mac-wallpaper/releases/download/v#{version}/MacWallpaper-#{version}.zip"
   name "MacWallpaper"
