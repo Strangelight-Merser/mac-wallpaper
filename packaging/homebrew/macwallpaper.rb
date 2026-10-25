@@ -2,10 +2,10 @@ cask "macwallpaper" do
   version "0.0.0-dev"
   sha256 "0000000000000000000000000000000000000000000000000000000000000000"
 
-  url "https://github.com/OWNER/REPO/releases/download/v#{version}/MacWallpaper-#{version}.zip"
+  url "https://github.com/Strangelight-Merser/mac-wallpaper/releases/download/v#{version}/MacWallpaper-#{version}.zip"
   name "MacWallpaper"
   desc "Plays Wallpaper Engine wallpapers on the desktop"
-  homepage "https://github.com/OWNER/REPO"
+  homepage "https://github.com/Strangelight-Merser/mac-wallpaper"
 
   depends_on arch: :arm64
   depends_on macos: ">= :sonoma"

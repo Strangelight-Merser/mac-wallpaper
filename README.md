@@ -64,8 +64,8 @@ choosing wallpapers from your subscriptions.
 Needs Xcode 26.3 or later (Swift 6.2).
 
 ```bash
-git clone --recurse-submodules https://github.com/OWNER/REPO.git
-cd REPO
+git clone --recurse-submodules https://github.com/Strangelight-Merser/mac-wallpaper.git
+cd mac-wallpaper
 ./scripts/build.sh
 open .build/MacWallpaper.app
 ```

@@ -78,13 +78,19 @@ final class CMTests: XCTestCase {
         try await client.connect(); _ = try await client.logOn(testTokens())
         do { _ = try await client.callService("No.Reply#1", Data()); XCTFail("expected timeout") }
         catch { XCTAssertEqual(error as? SteamError, .timeout) }
-        let cancelled = Task { try await client.callService("Cancel.Reply#1", Data()) }
+        // A separate client with a long timeout: on a slow machine the 30 ms one could time out before the cancel or
+        // the disconnect.
+        let quiet = FakeCM()
+        await quiet.configure(ignore: true)
+        let patient = SteamCMClient(machineName: "offline", http: directoryHTTP(), jobTimeout: .seconds(30)) { _ in quiet.connection }
+        try await patient.connect(); _ = try await patient.logOn(testTokens())
+        let cancelled = Task { try await patient.callService("Cancel.Reply#1", Data()) }
         try await Task.sleep(for: .milliseconds(5)); cancelled.cancel()
         do { _ = try await cancelled.value; XCTFail("expected cancellation") }
         catch { XCTAssertTrue(error is CancellationError) }
-        let pending = Task { try await client.callService("Disconnect.Reply#1", Data()) }
+        let pending = Task { try await patient.callService("Disconnect.Reply#1", Data()) }
         try await Task.sleep(for: .milliseconds(5))
-        fake.sink.finish()
+        quiet.sink.finish()
         do { _ = try await pending.value; XCTFail("expected disconnect") }
         catch { XCTAssertEqual(error as? SteamError, .disconnected) }
     }
