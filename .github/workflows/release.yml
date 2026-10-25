@@ -28,6 +28,8 @@ jobs:
           codesign --verify --strict "$bin/wecli"
           mkdir -p dist
           ditto -c -k --keepParent .build/MacWallpaper.app "dist/MacWallpaper-$version.zip"
+          # Same file under a fixed name: .../releases/latest/download/MacWallpaper.zip always gets the newest.
+          cp "dist/MacWallpaper-$version.zip" dist/MacWallpaper.zip
           ditto -c -k "$bin/wecli" "dist/wecli-$version.zip"
           cd dist
           shasum -a 256 "MacWallpaper-$version.zip" "wecli-$version.zip" > "MacWallpaper-$version.sha256"
@@ -38,4 +40,4 @@ jobs:
         run: |
           version="${GITHUB_REF_NAME#v}"
           gh release create "$GITHUB_REF_NAME" --verify-tag --draft --title "$GITHUB_REF_NAME" --notes "" \
-            "dist/MacWallpaper-$version.zip" "dist/wecli-$version.zip" "dist/MacWallpaper-$version.sha256"
+            "dist/MacWallpaper-$version.zip" dist/MacWallpaper.zip "dist/wecli-$version.zip" "dist/MacWallpaper-$version.sha256"

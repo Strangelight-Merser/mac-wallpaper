@@ -6,6 +6,7 @@
 
   <p>
     <a href="https://github.com/Strangelight-Merser/mac-wallpaper/releases/latest"><img src="https://img.shields.io/github/v/release/Strangelight-Merser/mac-wallpaper?style=flat-square&label=download&color=8a5cf5" alt="Download"></a>
+    <a href="https://github.com/Strangelight-Merser/mac-wallpaper/releases"><img src="https://img.shields.io/github/downloads/Strangelight-Merser/mac-wallpaper/total?style=flat-square&color=8a5cf5" alt="Downloads"></a>
     <img src="https://img.shields.io/badge/macOS-14%2B-blue?style=flat-square" alt="macOS 14+">
     <img src="https://img.shields.io/badge/Apple%20Silicon-only-lightgrey?style=flat-square" alt="Apple Silicon">
     <a href="https://github.com/Strangelight-Merser/mac-wallpaper/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Strangelight-Merser/mac-wallpaper/ci.yml?branch=main&style=flat-square&label=CI" alt="CI"></a>
@@ -13,7 +14,8 @@
   </p>
 
   <p>
-    <a href="https://github.com/Strangelight-Merser/mac-wallpaper/releases/latest"><b>Download</b></a> ·
+    <a href="https://github.com/Strangelight-Merser/mac-wallpaper/releases/latest/download/MacWallpaper.zip"><b>Download</b></a> ·
+    <a href="https://github.com/Strangelight-Merser/mac-wallpaper/releases">Releases</a> ·
     <a href="#faq">FAQ</a> ·
     <a href="README.zh-CN.md">简体中文</a>
   </p>
@@ -40,10 +42,11 @@ it and use a Mac, MacWallpaper lets you enjoy your wallpapers there too, the way
 
 ## Install
 
-1. Download **MacWallpaper-x.y.z.zip** from the [latest release](https://github.com/Strangelight-Merser/mac-wallpaper/releases/latest),
-   unzip it and move **MacWallpaper** to your Applications folder.
+1. [**Download MacWallpaper**](https://github.com/Strangelight-Merser/mac-wallpaper/releases/latest/download/MacWallpaper.zip) (the latest version; older ones are on the
+   [Releases](https://github.com/Strangelight-Merser/mac-wallpaper/releases) page), unzip it and move **MacWallpaper** to your Applications folder.
 2. Open it. The app isn't notarized by Apple yet, so the first time macOS blocks it: go to
-   **System Settings → Privacy & Security** and click **Open Anyway**.
+   **System Settings → Privacy & Security** and click **Open Anyway**. (Or, in Terminal:
+   `xattr -dr com.apple.quarantine /Applications/MacWallpaper.app`.)
 3. Follow the welcome guide: log in to Steam, get Wallpaper Engine's files, pick wallpapers from your subscriptions.
 
 Requires macOS 14 Sonoma or later on a Mac with Apple Silicon.

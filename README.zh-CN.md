@@ -6,6 +6,7 @@
 
   <p>
     <a href="https://github.com/Strangelight-Merser/mac-wallpaper/releases/latest"><img src="https://img.shields.io/github/v/release/Strangelight-Merser/mac-wallpaper?style=flat-square&label=%E4%B8%8B%E8%BD%BD&color=8a5cf5" alt="下载"></a>
+    <a href="https://github.com/Strangelight-Merser/mac-wallpaper/releases"><img src="https://img.shields.io/github/downloads/Strangelight-Merser/mac-wallpaper/total?style=flat-square&label=%E4%B8%8B%E8%BD%BD%E9%87%8F&color=8a5cf5" alt="下载量"></a>
     <img src="https://img.shields.io/badge/macOS-14%2B-blue?style=flat-square" alt="macOS 14+">
     <img src="https://img.shields.io/badge/Apple%20%E8%8A%AF%E7%89%87-only-lightgrey?style=flat-square" alt="仅支持 Apple 芯片">
     <a href="https://github.com/Strangelight-Merser/mac-wallpaper/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Strangelight-Merser/mac-wallpaper/ci.yml?branch=main&style=flat-square&label=CI" alt="CI"></a>
@@ -13,7 +14,8 @@
   </p>
 
   <p>
-    <a href="https://github.com/Strangelight-Merser/mac-wallpaper/releases/latest"><b>下载</b></a> ·
+    <a href="https://github.com/Strangelight-Merser/mac-wallpaper/releases/latest/download/MacWallpaper.zip"><b>下载</b></a> ·
+    <a href="https://github.com/Strangelight-Merser/mac-wallpaper/releases">所有版本</a> ·
     <a href="#常见问题">常见问题</a> ·
     <a href="README.md">English</a>
   </p>
@@ -37,9 +39,10 @@ Wallpaper Engine 拥有世界上最多的动态壁纸，却只能在 Windows 上
 
 ## 安装
 
-1. 从[最新版本](https://github.com/Strangelight-Merser/mac-wallpaper/releases/latest)下载 **MacWallpaper-x.y.z.zip**，
+1. [**下载 MacWallpaper**](https://github.com/Strangelight-Merser/mac-wallpaper/releases/latest/download/MacWallpaper.zip)（最新版本；旧版本在[所有版本](https://github.com/Strangelight-Merser/mac-wallpaper/releases)页面），
    解压后把 **MacWallpaper** 拖进“应用程序”文件夹。
 2. 打开它。应用暂时没有经过 Apple 公证，第一次打开会被 macOS 拦下：到**系统设置 → 隐私与安全性**里点**仍要打开**。
+   （也可以在“终端”里运行 `xattr -dr com.apple.quarantine /Applications/MacWallpaper.app`。）
 3. 跟着欢迎页走：登录 Steam、获取 Wallpaper Engine 的文件、从你的订阅里挑选壁纸。
 
 需要搭载 Apple 芯片的 Mac，macOS 14 Sonoma 或更新版本。
