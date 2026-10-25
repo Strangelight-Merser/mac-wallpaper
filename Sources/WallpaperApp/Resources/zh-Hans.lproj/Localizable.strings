@@ -55,9 +55,9 @@
 "No Wallpapers Yet" = "还没有壁纸";
 "Add a folder that contains Wallpaper Engine wallpapers, for example one copied from your Windows PC. Wallpapers you subscribe to on Steam will appear here too." = "添加一个包含 Wallpaper Engine 壁纸的文件夹，例如从 Windows 电脑拷过来的。你在 Steam 上订阅的壁纸也会显示在这里。";
 "Nothing to Show" = "没有可显示的壁纸";
-"%lld wallpapers are hidden by the search or the view options." = "有 %lld 个壁纸被搜索条件或显示选项隐藏了。";
+"Hidden by the search or the view options: ^[%lld wallpaper](inflect: true)." = "有 %lld 个壁纸被搜索条件或显示选项隐藏了。";
 "This section has no wallpapers." = "这里还没有壁纸。";
-"%lld wallpapers" = "%lld 个壁纸";
+"^[%lld wallpaper](inflect: true)" = "%lld 个壁纸";
 "On Desktop" = "正在使用";
 "Set as Wallpaper" = "设为壁纸";
 "Open Workshop Page" = "打开创意工坊页面";

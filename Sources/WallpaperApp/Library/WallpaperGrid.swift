@@ -22,7 +22,7 @@ struct WallpaperGrid: View {
                     Label { Text("Nothing to Show") } icon: { Image(systemName: "line.3.horizontal.decrease.circle") }
                 } description: {
                     if model.hiddenCount > 0 {
-                        Text("\(model.hiddenCount) wallpapers are hidden by the search or the view options.")
+                        Text("Hidden by the search or the view options: ^[\(model.hiddenCount) wallpaper](inflect: true).")
                     } else {
                         Text("This section has no wallpapers.")
                     }
@@ -42,7 +42,7 @@ struct WallpaperGrid: View {
                     }
                     .padding(16)
                     if model.hiddenCount > 0 {
-                        Text("\(model.hiddenCount) wallpapers are hidden by the search or the view options.")
+                        Text("Hidden by the search or the view options: ^[\(model.hiddenCount) wallpaper](inflect: true).")
                             .font(.callout).foregroundStyle(.secondary)
                             .padding(.bottom, 16)
                     }
@@ -50,7 +50,7 @@ struct WallpaperGrid: View {
             }
         }
         .navigationTitle(Text("Wallpaper Library"))
-        .navigationSubtitle(Text("\(items.count) wallpapers"))
+        .navigationSubtitle(Text("^[\(items.count) wallpaper](inflect: true)"))
     }
 }
 

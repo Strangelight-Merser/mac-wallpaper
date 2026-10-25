@@ -109,7 +109,7 @@ private struct Sidebar: View {
                 if let account = steam.account {
                     // A Menu as the row itself draws dimmed in a sidebar: a plain row with a context menu, and the
                     // same actions behind "…" in the section header.
-                    Label { Text(account.accountName) } icon: { Image(systemName: "person.crop.circle.fill") }
+                    Label { Text(displayedAccountName(account.accountName)) } icon: { Image(systemName: "person.crop.circle.fill") }
                         .contextMenu { accountActions }
                     .help(Text("Logged in to Steam"))
                     if !steam.pendingUpdates.isEmpty {

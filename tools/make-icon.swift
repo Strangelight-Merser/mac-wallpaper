@@ -1,8 +1,11 @@
-// Draws the app icon (a dusk landscape inside the macOS squircle) and writes AppIcon.icns.
-// Usage: swift tools/make-icon.swift <output folder>
+// Writes AppIcon.icns: square artwork placed in the macOS icon shape with its shadow and edge. The artwork is
+// packaging/AppIcon-artwork.png when given (e.g. a generated illustration), else a drawn dusk landscape.
+// Usage: swift tools/make-icon.swift packaging packaging/AppIcon-artwork.png   (the artwork was generated with GPT)
 import AppKit
 
 let out = URL(fileURLWithPath: CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : ".")
+let artwork: CGImage? = CommandLine.arguments.count > 2
+    ? NSImage(contentsOfFile: CommandLine.arguments[2])?.cgImage(forProposedRect: nil, context: nil, hints: nil) : nil
 
 func color(_ hex: UInt32, _ alpha: CGFloat = 1) -> CGColor {
     CGColor(srgbRed: CGFloat(hex >> 16 & 255) / 255, green: CGFloat(hex >> 8 & 255) / 255, blue: CGFloat(hex & 255) / 255, alpha: alpha)
@@ -51,6 +54,10 @@ func draw(size: Int) -> CGImage {
 
     ctx.saveGState()
     ctx.addPath(shape); ctx.clip()
+    if let artwork {
+        ctx.interpolationQuality = .high
+        ctx.draw(artwork, in: body)
+    } else {
     // Dusk sky: deep indigo at the top, violet, then warm at the horizon.
     let sky = CGGradient(colorsSpace: nil, colors: [color(0x120c3a), color(0x3b1f7a), color(0xb4457f), color(0xff9a62)] as CFArray,
                          locations: [0, 0.45, 0.78, 1])!
@@ -90,6 +97,7 @@ func draw(size: Int) -> CGImage {
         ctx.restoreGState()
     }
 
+    }
     // Glassy highlight along the top edge.
     let shine = CGGradient(colorsSpace: nil, colors: [color(0xffffff, 0.16), color(0xffffff, 0)] as CFArray, locations: [0, 1])!
     ctx.drawLinearGradient(shine, start: CGPoint(x: 512, y: body.maxY), end: CGPoint(x: 512, y: body.maxY - 220), options: [])

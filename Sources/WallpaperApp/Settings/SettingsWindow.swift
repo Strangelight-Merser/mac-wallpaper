@@ -165,7 +165,7 @@ private struct StoragePane: View {
             Section {
                 if let account = steam.account {
                     LabeledContent { Button { steam.signOut() } label: { Text("Log Out") } } label: {
-                        Text("Steam"); Text("Logged in as \(account.accountName)")
+                        Text("Steam"); Text("Logged in as \(displayedAccountName(account.accountName))")
                     }
                 } else {
                     LabeledContent { Button { openLibrary(); steam.showLogin() } label: { Text("Log In…") } } label: {

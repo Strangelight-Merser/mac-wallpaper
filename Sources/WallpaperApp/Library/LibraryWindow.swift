@@ -50,6 +50,11 @@ final class LibraryWindowController: NSWindowController, NSWindowDelegate {
                 }
                 // MW_LIBRARY_SHOW=login opens the Steam login sheet (captured as <file>-sheet.png).
                 if env["MW_LIBRARY_SHOW"] == "login" { self?.steam.showLogin() }
+                // MW_LIBRARY_SHOW=included shows the wallpapers that come with the app (screenshots without others' art).
+                if env["MW_LIBRARY_SHOW"] == "included" {
+                    self?.model.section = .bundled
+                    self?.model.selection = self?.model.entries.first { $0.root == .bundled }?.id
+                }
                 // MW_LIBRARY_SHOW=browse opens Browse the Workshop (MW_LIBRARY_SELECT then picks the first result).
                 if env["MW_LIBRARY_SHOW"] == "browse" {
                     self?.model.section = .workshopBrowse
@@ -72,6 +77,11 @@ final class LibraryWindowController: NSWindowController, NSWindowDelegate {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 12) { [weak self] in self?.browse.selection = self?.browse.items.first?.id }
             }
             let delay: Double = env["MW_LIBRARY_SHOW"] == "browse" ? 16 : 7
+            // Snapshots look like a focused window: macOS may not have let this launch take focus.
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay - 1) { [weak self] in
+                NSApp.activate(ignoringOtherApps: true)
+                self?.window?.makeKeyAndOrderFront(nil)
+            }
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in self?.snapshot(to: URL(fileURLWithPath: path)) }
         }
     }
@@ -99,4 +109,10 @@ final class LibraryWindowController: NSWindowController, NSWindowDelegate {
 func returnToMenuBarIfNoWindows(closing: NSWindow?) {
     let others = NSApp.windows.filter { $0 !== closing && $0.isVisible && $0.styleMask.contains(.titled) }
     if others.isEmpty { NSApp.setActivationPolicy(.accessory) }
+}
+
+/// The Steam account name as shown in the window. MW_DISPLAY_ACCOUNT=<name> replaces it (screenshots for the README
+/// without the user's real account name).
+func displayedAccountName(_ name: String) -> String {
+    ProcessInfo.processInfo.environment["MW_DISPLAY_ACCOUNT"] ?? name
 }

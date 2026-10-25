@@ -191,7 +191,7 @@ struct WorkshopBrowseView: View {
                 .fixedSize()
                 Spacer()
                 if browse.total > 0 {
-                    Text("\(browse.total) wallpapers").font(.callout).foregroundStyle(.secondary).monospacedDigit()
+                    Text("^[\(browse.total) wallpaper](inflect: true)").font(.callout).foregroundStyle(.secondary).monospacedDigit()
                 }
             }
             .padding(.horizontal, 16).padding(.vertical, 10)
