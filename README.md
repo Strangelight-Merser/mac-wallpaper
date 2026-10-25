@@ -74,7 +74,8 @@ Requires macOS 14 Sonoma or later on a Mac with Apple Silicon.
 
 ### Mac
 
-- [x] Menu-bar app with a settings window; open at login
+- [x] Lives in the Dock, the menu bar, or both; right-click the Dock icon for quick controls
+- [x] A settings window; open at login
 - [x] Pause on battery or in Low Power Mode, or lower the frame rate instead
 - [x] Fill, fit or stretch
 - [x] English and Simplified Chinese
