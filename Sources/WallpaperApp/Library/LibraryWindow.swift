@@ -104,9 +104,11 @@ final class LibraryWindowController: NSWindowController, NSWindowDelegate {
     }
 }
 
-/// Back to a menu-bar-only app (no Dock icon) once no library or settings window is open.
+/// Back to a menu-bar-only app (no Dock icon) once no library or settings window is open, unless the user keeps
+/// MacWallpaper in the Dock.
 @MainActor
 func returnToMenuBarIfNoWindows(closing: NSWindow?) {
+    guard !(UserDefaults.standard.object(forKey: "showInDock") as? Bool ?? true) else { return }
     let others = NSApp.windows.filter { $0 !== closing && $0.isVisible && $0.styleMask.contains(.titled) }
     if others.isEmpty { NSApp.setActivationPolicy(.accessory) }
 }

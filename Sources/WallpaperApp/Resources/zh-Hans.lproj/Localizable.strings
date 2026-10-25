@@ -286,3 +286,15 @@
 "Preset Of" = "预设来源";
 "Workshop item %@ (not downloaded)" = "创意工坊物品 %@（未下载）";
 "Included" = "随附壁纸";
+"Show in the Dock" = "在程序坞中显示";
+"Show in the Menu Bar" = "在菜单栏中显示";
+"Click the Dock icon to open the library; right-click it for what’s playing and Pause. At least one of the two stays on." = "点按程序坞图标打开壁纸库；右键点按可以看到正在播放的壁纸并暂停。两者至少保留一个。";
+"No wallpaper" = "未选择壁纸";
+"Couldn’t play this wallpaper" = "无法播放这个壁纸";
+"Paused · Screen locked" = "已暂停 · 屏幕已锁定";
+"Paused · Displays asleep" = "已暂停 · 显示器已睡眠";
+"Paused · On battery" = "已暂停 · 正在使用电池";
+"Paused · Low Power Mode" = "已暂停 · 低电量模式";
+"Playing" = "正在播放";
+"Paused" = "已暂停";
+"Loading…" = "正在载入…";

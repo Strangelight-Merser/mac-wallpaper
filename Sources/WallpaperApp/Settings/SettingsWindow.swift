@@ -81,6 +81,15 @@ private struct GeneralPane: View {
                 }
             }
             Section {
+                Toggle(isOn: $settings.showInDock) { Text("Show in the Dock") }
+                    .disabled(!settings.showInMenuBar)
+                Toggle(isOn: $settings.showInMenuBar) { Text("Show in the Menu Bar") }
+                    .disabled(!settings.showInDock)
+            } footer: {
+                Text("Click the Dock icon to open the library; right-click it for what’s playing and Pause. At least one of the two stays on.")
+                    .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            Section {
                 Toggle(isOn: $settings.mouseInput) {
                     Text("Mouse Interaction")
                     Text("Wallpapers react to the pointer and clicks on the desktop.")

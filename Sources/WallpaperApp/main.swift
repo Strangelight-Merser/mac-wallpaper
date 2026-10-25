@@ -1,7 +1,7 @@
 import AppKit
 import WEAudio
 
-/// Menu-bar app (no Dock icon) that renders a Wallpaper Engine scene behind the desktop icons.
+/// Renders Wallpaper Engine wallpapers behind the desktop icons. Lives in the Dock and/or the menu bar (Settings).
 ///
 /// Settings live in UserDefaults (`wallpaper`, `assets`, `fps`); `--wallpaper <dir>` and
 /// `--assets <dir>` on the command line override them (handy for `open MacWallpaper.app --args ...`).
@@ -53,8 +53,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         applyCommandLine()
         controller = WallpaperController()
         settings = AppSettings(controller: controller)
+        settings.presenceChanged = { [weak self] in self?.applyPresence() }
         controller.onStateChange = { [weak self] in self?.refreshMenu() }
         buildMenu()
+        applyPresence()
         loadCurrent()
         if let base = ProcessInfo.processInfo.environment["MW_SETTINGS_SNAPSHOT"] {
             settingsWindow.show()
@@ -66,8 +68,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc func showLibrary() { libraryWindow.show() }
 
-    /// Opening the app again (Finder, Launchpad, Spotlight) shows the library: the menu-bar icon can be
-    /// hidden behind the notch or other icons, and there is no Dock icon.
+    /// Opening the app again (Finder, Launchpad, Spotlight, a click on the Dock icon) shows the library: the
+    /// menu-bar icon can be hidden behind the notch or other icons.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         showLibrary()
         return true
@@ -97,9 +99,61 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: - menu
 
+    /// Dock icon and menu-bar icon as chosen in Settings; windows keep the Dock icon while open either way.
+    func applyPresence() {
+        statusItem?.isVisible = settings.showInMenuBar
+        let windowOpen = NSApp.windows.contains { $0.isVisible && $0.styleMask.contains(.titled) }
+        NSApp.setActivationPolicy(settings.showInDock || windowOpen ? .regular : .accessory)
+    }
+
+    /// Right-click on the Dock icon: what's playing and the everyday actions.
+    func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
+        let menu = NSMenu()
+        let title = NSMenuItem(title: currentTitle, action: nil, keyEquivalent: "")
+        title.isEnabled = false
+        menu.addItem(title)
+        let state = NSMenuItem(title: friendlyStatus, action: nil, keyEquivalent: "")
+        state.isEnabled = false
+        menu.addItem(state)
+        menu.addItem(.separator())
+        let pause = item(controller.pauseReasons.contains(.user) ? String(localized: "Resume") : String(localized: "Pause"),
+                         #selector(togglePause), "")
+        menu.addItem(pause)
+        menu.addItem(.separator())
+        menu.addItem(item(String(localized: "Wallpaper Library…"), #selector(showLibrary), ""))
+        menu.addItem(item(String(localized: "Settings…"), #selector(showSettings), ""))
+        return menu
+    }
+
+    /// The current wallpaper's title (from the library, else its project.json), for menus.
+    var currentTitle: String {
+        guard let path = defaults.string(forKey: "wallpaper") else { return String(localized: "No wallpaper") }
+        let url = URL(fileURLWithPath: path).standardizedFileURL
+        if let entry = libraryModel.entries.first(where: { $0.folder.standardizedFileURL == url }) { return entry.title }
+        let project = (try? JSONSerialization.jsonObject(with: Data(contentsOf: url.appendingPathComponent("project.json")))) as? [String: Any]
+        return project?["title"] as? String ?? url.lastPathComponent
+    }
+
+    /// What the wallpaper is doing, in plain words.
+    var friendlyStatus: String {
+        if controller.loadError != nil { return String(localized: "Couldn’t play this wallpaper") }
+        let reasons = controller.pauseReasons
+        let because: [(WallpaperController.PauseReason, String)] = [
+            (.user, String(localized: "Paused")),
+            (.locked, String(localized: "Paused · Screen locked")),
+            (.screensAsleep, String(localized: "Paused · Displays asleep")),
+            (.battery, String(localized: "Paused · On battery")),
+            (.lowPower, String(localized: "Paused · Low Power Mode")),
+        ]
+        if let reason = because.first(where: { reasons.contains($0.0) }) { return reason.1 }
+        if reasons.contains(.loading) { return String(localized: "Loading…") }
+        return String(localized: "Playing")
+    }
+
     func buildMenu() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        statusItem.button?.image = NSImage(systemSymbolName: "sparkles.tv", accessibilityDescription: "Wallpaper")
+        statusItem.button?.image = Self.menuBarIcon
+        statusItem.button?.toolTip = "MacWallpaper"
         let menu = NSMenu()
         menu.delegate = self
         statusLine.isEnabled = false
@@ -126,8 +180,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func refreshMenu() {
         guard statusItem != nil else { return }
-        let name = defaults.string(forKey: "wallpaper").map { ($0 as NSString).lastPathComponent } ?? "—"
-        statusLine.title = "\(name): \(controller.statusText)"
+        statusLine.title = "\(currentTitle) — \(friendlyStatus)"
         pauseItem.title = controller.pauseReasons.contains(.user) ? String(localized: "Resume") : String(localized: "Pause")
     }
 
@@ -146,6 +199,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc func showSettings() { settingsWindow.show() }
+
+    /// The menu-bar glyph: a screen with two flowing ribbons (the app icon's motif), drawn as a template image so
+    /// it matches light and dark menu bars like the system's own icons.
+    static let menuBarIcon: NSImage = {
+        let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { _ in
+            NSColor.black.setStroke()
+            let screen = NSBezierPath(roundedRect: NSRect(x: 1.5, y: 3, width: 15, height: 12), xRadius: 3, yRadius: 3)
+            screen.lineWidth = 1.5
+            screen.stroke()
+            // Two parallel waves flowing across the screen, like the icon's ribbons.
+            for (y, width) in [(CGFloat(6.4), CGFloat(1.6)), (CGFloat(10.0), CGFloat(1.2))] {
+                let wave = NSBezierPath()
+                wave.move(to: NSPoint(x: 4.2, y: y))
+                wave.curve(to: NSPoint(x: 13.8, y: y + 1.6), controlPoint1: NSPoint(x: 7.6, y: y + 3.4),
+                           controlPoint2: NSPoint(x: 10.4, y: y - 1.8))
+                wave.lineWidth = width
+                wave.lineCapStyle = .round
+                wave.stroke()
+            }
+            return true
+        }
+        image.isTemplate = true
+        image.accessibilityDescription = "MacWallpaper"
+        return image
+    }()
 
 }
 

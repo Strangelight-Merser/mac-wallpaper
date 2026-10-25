@@ -20,6 +20,11 @@ final class AppSettings {
     var pauseInLowPowerMode: Bool {
         didSet { defaults.set(pauseInLowPowerMode, forKey: "pauseInLowPowerMode"); controller.pauseInLowPowerMode = pauseInLowPowerMode }
     }
+    /// Where the app shows itself: the Dock, the menu bar, or both (at least one stays on).
+    var showInDock: Bool { didSet { defaults.set(showInDock, forKey: "showInDock"); presenceChanged() } }
+    var showInMenuBar: Bool { didSet { defaults.set(showInMenuBar, forKey: "showInMenuBar"); presenceChanged() } }
+    /// Set by the app delegate: applies the Dock and menu-bar choice.
+    var presenceChanged: () -> Void = {}
     private(set) var audioEnabled: Bool
     private(set) var launchAtLogin: SMAppService.Status = SMAppService.mainApp.status
 
@@ -30,6 +35,9 @@ final class AppSettings {
         soundVolume = defaults.object(forKey: "soundVolume") as? Float ?? 1
         pauseOnBattery = defaults.bool(forKey: "pauseOnBattery")
         pauseInLowPowerMode = defaults.bool(forKey: "pauseInLowPowerMode")
+        let dock = defaults.object(forKey: "showInDock") as? Bool ?? true
+        showInDock = dock
+        showInMenuBar = !dock || (defaults.object(forKey: "showInMenuBar") as? Bool ?? true)
         // Only re-enable audio if the permission is still there (no prompt at launch).
         audioEnabled = defaults.bool(forKey: "audio") && SystemAudioCapture.hasPermission
         controller.fps = fps
